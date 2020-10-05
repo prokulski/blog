@@ -1,0 +1,364 @@
+---
+title: "Gdzie są sklepy, drogi czy cokolwiek innego?"
+author: "Łukasz Prokulski"
+date: "`r Sys.Date()`"
+output: 
+  html_document: 
+    fig_height: 6
+    fig_width: 9
+    fig_align: "center"
+    self_contained: no
+---
+
+Zastanawialiście się skąd wziąć listę wszystkich miejsc danego typu - na przykład przedszkola w Warszawie - i narysować je na mapie? Jeśli tak, to z tego postu dowiesz się jak to zrobić. Wpis techniczny, żadna tam analiza. Ale są mapki!
+
+```{r document_setup, echo=FALSE, message=FALSE, error=FALSE, warning=FALSE}
+library(tidyverse)
+library(knitr)
+library(kableExtra)
+library(htmlwidgets)
+
+# chunks options
+opts_chunk$set(message = FALSE, error = FALSE, warning = FALSE)
+options(knitr.table.format = "html") 
+
+# some better colours theme :)
+theme_set(theme_minimal() +
+            theme(plot.title = element_text(family = NULL, face = "bold", size = 18, color = "black"),
+                  plot.subtitle = element_text(family = NULL, face = "plain", size = 9, color = "black"),
+                  plot.caption = element_text(family = NULL, face = "italic", size = 9, color = "darkgray"),
+                  plot.background = element_rect(fill="#efefef", color="#aaaaaa"),
+                  panel.background = element_rect(fill = "white", color="black"),
+                  strip.text.x = element_text(face = "bold")))
+```
+
+Macie świadomość, że istnieje coś takiego jak Wikipedia, prawda? Zbiór haseł uzupełniany przez ochotników. Istnieje coś podobnego dla map i nazywa się [Open Street Map](https://wiki.openstreetmap.org/). Ludzie z całego świata dodają informacje o różnych obiektach na mapach - *budują* drogi, *stawiają* domki i tak dalej. Dane te można pokazać jako mapy, ale też przeszukiwać. W R mamy pakiet **[osmdata](https://ropensci.github.io/osmdata/)** (przygotowany przez zacną inicjatywę [rOpenSci](https://ropensci.org/), a  jest opakowaniem dla [Overpass API](https://wiki.openstreetmap.org/wiki/Overpass_API)), który umożliwi nam skorzystanie z tych informacji. W dalszej części do pokazania (na interaktywnych, przesuwanych i skalowanych) map użyjemy pakietu **[leaflet](http://rstudio.github.io/leaflet/)** (opierający się na bibliotece JavaScript [Leaflet](https://leafletjs.com/), który nota bene również korzysta z Open Street Map.
+
+Ciekawostka na marginesie: ostatnio Google zmienił drastycznie ceny używania Google Maps (ciekawy tekst na ten temat znajdziecie [tutaj](https://www.gdziepolek.pl/blog/pozegnanie-z-google-maps)), zatem korzystanie z Open Street Map może być wybawieniem. 
+
+
+Zaczniemy od wczytania odpowiednich bibliotek:
+
+```{r}
+library(tidyverse)	# zawsze! głównie dla dplyr i ggplot2
+library(sf)			# do rysowania danych geograficznych
+library(osmdata)	# clue tego wpisu; używam wersji dev z Githuba, instalacja przez devtools::install_github('osmdatar/osmdata')
+library(ggmap)		# dla statycznych map
+library(leaflet)	# dla map interaktywnych
+```
+
+W pierwszym kroku zdefiniujmy sobie obszar, z jakiego pobierzemy dane. A że wakacje, to niech to będą Bieszczady:
+
+```{r}
+q0 <- getbb("Wetlina, Poland") %>% opq(timeout = 60)
+```
+
+Kolejny krok to zdefiniowanie danych, jakie chcemy pobrać. 
+
+```{r}
+q1 <- add_osm_feature(q0, key = 'name', key_exact = TRUE) # wszystkie obiekty
+```
+
+O parametrach funkcji `add_osm_feature()` będzie za moment, na razie się tym nie przejmujmy. Zobaczmy po prostu co możemy z Open Street Map wyciągnąć, w jakich typach i układach danych.
+
+Na razie zdefiniowaliśmy zapytanie do API, czas pobrać dane. Pobieramy dane w obiektach *sf* (można użyć również `osmdata_sp()` jeśli wolicie format *sp*, ale *sf* jest wygodniejszy - po szczegóły odsyłam do dokumentacji pakietów *sp* i *sf*).
+
+```{r eval=FALSE}
+data_sf <- osmdata_sf(q1)
+```
+```{r echo=FALSE}
+data_sf <- readRDS("data_sf.RDS")
+```
+
+Dane pobrane (trochę to trwa - w sumie dostajemy jakieś `r print(object.size(data_sf), units = "auto")`!). można pobrać też te same dane do lokalnego pliku XML, a później z niego korzystać - odpowiednio modyfikując kod:
+
+```{r eval=FALSE}
+osmdata_xml(q1, "plik.xml") 				# pobranie danych do pliku XML
+data_sf <- osmdata_sf(q1, doc = "plik.xml")	# pobranie danych z XMLa
+```
+
+Co ciekawe - plik na dysku zajmuje mniej niż dane w pamięci - w tym przypadku jest to około 17 MB. Warto ten plik obejrzeć.
+
+Zobaczmy co mamy w pobranych danych:
+
+```{r}
+print(data_sf)
+```
+
+Widzimy, że jest to w dużym uproszczeniu lista z kilkoma informacjami, w tym z data.frame *osm_points*, *osm_lines*, *osm_polygons*, *osm_multilines* czy *osm_multipolygons* - to są właśnie nasze dane geograficzne. 
+
+Na początek narysujmy punkty, ale nie wszystkie `r nrow(data_sf$osm_points)` tylko 1% z nich - da nam to pogląd o tym gdzie są te punkty:
+
+```{r osmdata_01}
+data_sf$osm_points %>%
+  select(geometry) %>%
+  sample_frac(0.01) %>%
+  ggplot() +
+  geom_sf()
+```
+
+Pobranie danych w formacie *sf* pozwala na szybkie ich narysowanie - `geom_sf()` i po sprawie. Od razu mamy odpowiednie proporcje mapy, odpowiednio podpisane osie itd. Jeśli poszukacie [starszych postów](/index.php/2017/12/22/mapy-w-r-rgeos/) i przeanalizujecie kod zobaczycie ile zabawy jest z obiektami *sp*.
+
+W każdym razie na mapie wyżej widzimy, że mamy nie tylko punkty z okolic Wetliny (jak zdefiniowaliśmy obszar) ale w sumie z całej Polski i nie tylko. To kwestia uporządkowania danych w ramach Open Street Map - dokładnie w to nie wnikałem szczerze mówiąc. Ale możemy przyciąć te dane do tych, które mieszczą się we wskazanym obszarze:
+
+```{r}
+data_sf <- trim_osmdata(data_sf, getbb("Wetlina, Poland", format_out = "polygon"))
+```
+
+Uwaga - to przycięcie wyrzuca całe obiekty (na przykład linie), które wychodzą poza obszar, a nie przycina ich do obszaru. No i funkcja ma jeszcze problemy - zgłosiłem [opdowienie issue](https://github.com/ropensci/osmdata/issues/137) do autorów. Po przycięciu mamy:
+
+```{r}
+print(data_sf)
+```
+
+Widocznie mniej danych, co możemy sprawdzić ponownie rysując punkty (teraz już wszystkie - zrobiło się ich `r nrow(data_sf$osm_points)`, a więc mniej - było 188813):
+
+```{r osmdata_02}
+data_sf$osm_points %>%
+  select(geometry) %>%
+  ggplot() +
+  geom_sf()
+```
+
+No dobrze, ale co to za punkty? Gdzie one są fizycznie? Czy da to się zestawić z mapą? Oczywiście. Weźmy mapkę z Google Maps (statyczny obrazek, tutaj taki zawierający zdjęcie satelitarne):
+
+```{r eval=FALSE}
+mapa <- get_map(location = "Wetlina, Poland", zoom = 13, maptype = "hybrid")
+```
+```{r echo=FALSE}
+mapa <- readRDS("mapa.RDS")
+```
+
+i zamiast samych punktów narysujmy *polygony*, czyli inny typ danych wciągniętych z OSM:
+
+```{r osmdata_03}
+ggmap(mapa, darken = 0.5) + geom_sf(data = data_sf$osm_polygons,
+                                    inherit.aes = FALSE,
+                                    color = "white", size = 1)
+```
+
+Tak samo możemy narysować linie:
+
+```{r osmdata_04}
+ggmap(mapa, darken = 0.5) + geom_sf(data = data_sf$osm_lines,
+                                    inherit.aes = FALSE,
+                                    aes(color = highway), size = 2)
+```
+
+czy też te punkty, które mają nazwy:
+
+```{r osmdata_05}
+ggmap(mapa, darken = 0.7) + geom_sf(data = data_sf$osm_points %>% filter(!is.na(name)),
+                                    inherit.aes = FALSE,
+                                    color = "white", size = 0.1)
+```
+
+Jak widzicie wszystko sprowadza się do tego samego kodu i w zasadzie wybrania odpowiedniego data.frame (elementy listy *osm_point*, *osm_lines* itd) i narysowania go poprzez `geom_sf()`.
+
+Ale co to za punkty z nazwami, jakie są te nazwy? Dlaczego wszystkich punktów jest tak dużo, a tych z nazwami mało? Ano dlatego, że każdy polygon czy linia składa się z punktów. Stąd bardzo dużo punktów tworzących linie (na przykład jakieś drogi), a mało punktów konkretnych (typu szkoła, przystanek autobusowy). Jest to dość upierdliwe, ale można się połapać - szczególnie jak poczyta się o samych mapach (OSM oczywiście).
+
+Sprawdźmy punkty z nazwami, może mapka mogłaby być interaktywna? Skorzystajmy tym razem z *leaflet*. Na początek znajdźmy środek naszego pobranego obszaru, tak aby odpowiednio wycentrować mapkę. Punkty narożne znajdziemy w *data_sf$bbox* i wystarczy odpowiednio ten ciąg przeliczyć:
+
+```{r}
+gps_coords <- data_sf$bbox %>% str_split(",") %>% unlist() %>% as.numeric()
+lng_coord <- (gps_coords[2] + gps_coords[4])/2
+lat_coord <- (gps_coords[1] + gps_coords[3])/2
+```
+
+Teraz już przygotowujemy mapę:
+
+```{r eval=FALSE}
+leaflet() %>%
+  addTiles() %>%
+  setView(lng = lng_coord, lat = lat_coord, zoom = 12) %>%
+  addMarkers(data = data_sf$osm_points %>%
+               filter(!is.na(name)) %>%
+               select(name, geometry),
+             label = ~as.character(name))
+```
+```{r echo=FALSE}
+p <- leaflet() %>%
+  addTiles() %>%
+  setView(lng = lng_coord, lat = lat_coord, zoom = 12) %>%
+  addMarkers(data = data_sf$osm_points %>%
+               filter(!is.na(name)) %>%
+               select(name, geometry),
+             label = ~as.character(name))
+htmlwidgets::saveWidget(p, "leaflet_01.html")
+```
+
+która wygląda tak:
+
+<iframe src="leaflet_01.html" frameborder="0" scrolling="auto" width="100%" height="500px"></iframe>
+
+Przy najechaniu na *pinezkę* pokazują nam się nazwy punktów - o to nam chodziło. Zwróćcie uwagę, że leaflet też znakomicie radzi sobie z danymi podanymi jako obiekty typu *sf* (tymi *sp* też).
+
+Uzbrojeni w podstawowe umiejętności możemy przygotować zestaw funkcji, dzięki którym dalsza eksploracja zawartości Open Street Map będzie sprowadzała się do pojedynczych linii kodu. Zatem po kolei.
+
+Na początek będziemy potrzebowali funkcji, która pobierze nam dane. O parametrach *key* i *value* jeszcze będzie, spokojnie:
+
+```{r}
+getOSMData <- function(f_localisation, f_key, f_value) {
+  
+  data_sf <- getbb(f_localisation) %>%
+    opq() %>%
+    add_osm_feature(key = f_key, value = f_value) %>%
+    osmdata_sf()
+  
+  return(data_sf)
+}
+```
+
+Przyda się funkcja, która zwróci nam środek obszaru z pobranymi danymi:
+
+```{r}
+getLngLat <- function(f_data_sf) {
+  
+  gps_coords <- f_data_sf$bbox %>%
+    str_split(",") %>%
+    unlist() %>%
+    as.numeric()
+  
+  lng_coord <- (gps_coords[2] + gps_coords[4])/2
+  lat_coord <- (gps_coords[1] + gps_coords[3])/2
+  
+  return(list(lng = lng_coord, lat = lat_coord))
+}
+```
+
+Teraz przygotujmy komplet funkcji rysujących na mapach interaktywnych (leaflet) odpowiednio punkty, polygony i linie:
+
+```{r}
+plotLeafletMap_points <- function(f_data_sf) {
+  
+  # poniżej używamy kolumny category na mapie - jeśli nie istnieje to ustawiamy, żeby była pusta
+  if(is.null(f_data_sf$osm_points$category)) f_data_sf$osm_points$category <- NA
+  
+  gps_coords <- getLngLat(f_data_sf)
+  
+  leaflet() %>%
+    addTiles() %>%
+    setView(lng = gps_coords$lng, lat = gps_coords$lat, zoom = 11) %>%
+    addMarkers(data = f_data_sf$osm_points,
+               label = ~paste0(if_else(is.na(name),
+                                       "",
+                                       as.character(name)
+               ),
+               if_else(is.na(category),
+                       "",
+                       paste0(" (", category, ")")
+               )
+               )
+    )
+}
+
+plotLeafletMap_polygons <- function(f_data_sf) {
+  gps_coords <- getLngLat(f_data_sf)
+  
+  # workaround konieczny, żeby polygony zadziałały
+  # via https://github.com/ropensci/osmdata/issues/100
+  names(f_data_sf$osm_polygons$geometry) <- NULL
+  
+  leaflet() %>%
+    addTiles() %>%
+    setView(lng = gps_coords$lng, lat = gps_coords$lat, zoom = 11) %>%
+    addPolygons(data = f_data_sf$osm_polygons,
+                opacity = 1,
+                color = 'red',
+                weight = 1,
+                fillOpacity = 0.2,
+                fillColor ='yellow',
+                smoothFactor = 0.9,
+                label = ~as.character(name))
+}
+
+plotLeafletMap_lines <- function(f_data_sf) {
+  names(f_data_sf$osm_lines$geometry) <- NULL
+  
+  gps_coords <- getLngLat(f_data_sf)
+  
+  leaflet() %>%
+    addTiles() %>%
+    setView(lng = gps_coords$lng, lat = gps_coords$lat, zoom = 11) %>%
+    addPolylines(data = f_data_sf$osm_lines,
+                 color = 'red')
+}
+```
+
+Kiedy już mamy gotowy pakiet narzędzi możemy z niego skorzystać.
+
+Na początek sprawdźmy gdzie w Szczecinie są sklepy spożywcze? Potrzebujemy odpowiednich wartości parametrów *key* i *value* dla naszej funkcji `getOSMData()`. Listę znaleźć można na [stosownej stronie OpenStreetMap](http://wiki.openstreetmap.org/wiki/Map_Features), albo (ale już bez wyjaśnienia co jest czym) korzystając z funkcji `available_features()` oraz `available_tags()` z pakietu *osmdata*.
+
+Niestety jak to w przypadku danych tworzonych przez społeczność musimy liczyć się z tym, że nie są kompletne, mogą nie być aktualne. A tutaj jeszcze dodatkowo - to samo może być opisane różnymi wartościami *key* i *value*. Spróbujmy jednak poszukać *shop=supermarket* czyli **supermarketów w Szczecinie**:
+
+```{r eval=FALSE}
+getOSMData("Szczecin, Poland", f_key = "shop", f_value = "supermarket") %>% plotLeafletMap_points()
+```
+```{r echo=FALSE}
+m <- getOSMData("Szczecin, Poland", "shop", "supermarket") %>% plotLeafletMap_points()
+htmlwidgets::saveWidget(m, "leaflet_02.html")
+```
+
+<iframe src="leaflet_02.html" frameborder="0" scrolling="auto" width="100%" height="500px"></iframe>
+
+Obiekty uzyskane przez `getOSMData()` (a precyzyjniej `osmdata_sf()`, bo nasza funkcja jest tylko opakowaniem dla niej) można łączyć, o na przykład tak (**miejsca do spania w Poznaniu**):
+
+```{r}
+noclegi <- c(getOSMData("Poznań, Poland", 'tourism', 'hotel'),
+             getOSMData("Poznań, Poland", 'tourism', 'motel'),
+             getOSMData("Poznań, Poland", 'tourism', 'hostel'),
+             getOSMData("Poznań, Poland", 'tourism', 'guest_house'),
+             getOSMData("Poznań, Poland", 'tourism', 'apartment'))
+```
+
+Poszukaliśmy elementów z kategorii (*key*) *tourism* w kilku odmianach (hotel, motel, hotel, gościniec i apartament do wynajęcia). Możemy im przypisać teraz wartości w kolumnie *category*, żeby ładnie na mapie było widać (w dymkach nad pinezkami) co jest czym:
+
+```{r}
+noclegi$osm_points$category <- noclegi$osm_points$tourism
+```
+
+i na koniec rysujemy sobie całość:
+
+```{r eval=FALSE}
+plotLeafletMap_points(noclegi)
+```
+```{r echo=FALSE}
+m <- plotLeafletMap_points(noclegi)
+htmlwidgets::saveWidget(m, "leaflet_03.html")
+```
+
+<iframe src="leaflet_03.html" frameborder="0" scrolling="auto" width="100%" height="500px"></iframe>
+
+To były punkty, zobaczmy jak działa funkcja rysująca linie - na przykład **szukając w Krakowie ścieżek rowerowych**:
+
+```{r eval=FALSE}
+c(getOSMData("Kraków, Poland", "route", "bicycle"),
+  getOSMData("Kraków, Poland", "highway", "cycleway")) %>% 
+  plotLeafletMap_lines()
+```
+```{r echo=FALSE}
+m <- c(getOSMData("Kraków, Poland", "route", "bicycle"),
+       getOSMData("Kraków, Poland", "highway", "cycleway")) %>% 
+  plotLeafletMap_lines()
+htmlwidgets::saveWidget(m, "leaflet_04.html")
+```
+
+<iframe src="leaflet_04.html" frameborder="0" scrolling="auto" width="100%" height="500px"></iframe>
+
+Problem jaki widać od razu to ograniczenie obszaru. O tym między innymi jest w [issue 137](https://github.com/ropensci/osmdata/issues/137) do pakietu. W funkcji `getOSMData()` moglibyśmy dodać odpowiedni fragment z `trim_osmdata()`, ale to jeszcze nie działa poprawnie. Stąd mamy ścieżkę z Krakowa do Częstochowy czy nawet Wiednia. Poza tym wybraliśmy tutaj tylko dwa typy obiektów wprost nawiązujące do ścieżki rowerowej: *route=bicycle* oraz *highway=cycleway*, a kombinacji jest więcej ([zobacz tu](https://wiki.openstreetmap.org/wiki/Bicycle)) i aby było jak należy powinniśmy użyć wszystkich odpowiednich.
+
+Analogicznie do punktów i linii możemy poszukać *polygonów*. **Uniwersytety** (właściewie to uczelnie wyższe) **w Gdańsku?** Proszę bardzo:
+
+```{r eval=FALSE}
+getOSMData("Gdańsk, Poland", "amenity", "university") %>% plotLeafletMap_polygons()
+```
+```{r echo=FALSE}
+m <- getOSMData("Gdańsk, Poland", "amenity", "university") %>% plotLeafletMap_polygons()
+htmlwidgets::saveWidget(m, "leaflet_05.html")
+```
+
+<iframe src="leaflet_05.html" frameborder="0" scrolling="auto" width="100%" height="500px"></iframe>
+
+Dane z Open Street Map są stale uzupełniane - zobaczcie na historię ich rozwoju na superowej stronce **[10 years of OpenStreetMap](https://www.mapbox.com/ten-years-openstreetmap/)**. Warto też pooglądać swoją okolicę, może samemu coś dodać? Zerknij na [openstreetmap.org](https://www.openstreetmap.org/), warto. Ciekawy jest również post [How to (quickly) enrich a map with natural and anthropic details](http://www.francescobailo.net/2018/08/how-to-quickly-enrich-a-map-with-natural-and-anthropic-details/) który wykorzystuje dane pozyskane z pomocą *osmdata*.
+
+W końcu mapy to świetna zabawa.

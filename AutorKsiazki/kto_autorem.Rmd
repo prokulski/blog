@@ -1,0 +1,355 @@
+---
+title: "Kto napisał tę książkę?"
+author: "Lukasz Prokulski"
+date: "30 czerwca 2017"
+output: 
+  html_document: 
+    fig_height: 10
+    fig_width: 8
+    self_contained: no
+---
+
+Czy da się rozpoznać kto jest autorem książki na podstawie jej treści? Są tacy badacze, którzy to robią (i na przykład podważają autorstwo niektórych dramatów Szekspira), my zrobimy to samo z kryminałami (bo jest to takie zadanie śledcze).
+
+<!-- more -->
+
+Na warsztat weźmiemy dwóch poczytnych polskich autorów, tak żebyście mieli szansę sprawdzić czy to co wychodzi jest zgodne z tym co znacie z książek. Oczywiście czytaliście je, prawda?
+
+Mowa o Zygmuncie Miłoszewskimtrzech  i jego trylogii o Teodorze Szackim oraz Remigiuszu Mrozie i jego trzech książkach o Joannie łce. Do tego dorzucimy dwie książki - "Bezcennego" oraz "Enklawę". Udamy, że nie wiemy kto je napisał. Żeby było trudniej - "Enklawa" podpisana jest przez Ove Løgmansbø, ale nawet sam Mróz [na swojej stronie przyznaje się](http://remigiuszmroz.pl/ove-logmansbo/), że to jego pseudonim, zaś "Bezcenny" nie jest o Szackim.
+
+Żeby było jeszcze zabawniej - ja (jeszcze, czeka właśnie w kolejce) nie czytałem żadnej książki Remigiusza Mroza, więc nie wiem o czym i o kim są (ta Chyłka to wynik tego co poniżej).
+
+
+Czego potrzebujemy? Oczywiście tekstów książek. Powinny być w plikach tekstowych. Najprościej przenieść je do takiego formatu z plików **.mobi** przy pomocy oprogramowania **[Calibre](https://calibre-ebook.com/)** - wczytujemy MOBI i konwertujemy na TXT.
+
+Wszystkie pliki TXT nazwałem odpowiednio i umieściłem w jednym folderze. Kilka operacji i wczytujemy wszystko do jednej dużej tabeli, w której kolumny to: autor książki, jej tytuł i w kolejne wiersze tekstu.
+
+
+```{r echo=FALSE}
+setwd("~/RProjects/AutorKsiazki")
+
+rm(list=ls())
+```
+```{r setup, message=FALSE, warning=FALSE, error=FALSE}
+library(tidyverse)
+library(tidytext)
+library(wordcloud)
+
+theme_set(theme_minimal())
+
+pl_stop_words <- read_lines("polish_stopwords.txt")
+
+# lista książek
+lista_ksiazek <- data_frame(
+  autor = c("Miloszewski", "Miloszewski", "Miloszewski", "Miloszewski",
+            "Mroz", "Mroz", "Mroz", "Mroz"),
+  tytul = c("Bezcenny", "Gniew", "Uwiklanie", "Ziarno_prawdy",
+            "Enklawa", "Kasacja", "Rewizja", "Zaginiecie")
+)
+
+liczba_ksiazek <- nrow(lista_ksiazek)
+
+# nazwy plików - złożone z listy książek
+lista_ksiazek$plik <- paste0("ksiazki/",
+                             lista_ksiazek$autor, "-", lista_ksiazek$tytul,
+                             ".txt")
+
+# poprawiamy nazwiska i tytuły, żeby ładniej wyglądało :)
+lista_ksiazek$autor <- ifelse(lista_ksiazek$autor == "Mroz",
+                              "Remigiusz Mróz",
+                              "Zygmunt Miłoszewski")
+
+# dwie książki oznaczamy jako nieznani autorzy
+lista_ksiazek[1, "autor"] <- "Nieznany_A"
+lista_ksiazek[5, "autor"] <- "Nieznany_B"
+
+# polskie literki w tytułach - żeby ładniej było widać :)
+lista_ksiazek[3, "tytul"] <- "Uwikłanie"
+lista_ksiazek[4, "tytul"] <- "Ziarno prawdy"
+lista_ksiazek[8, "tytul"] <- "Zaginięcie"
+
+
+# książki do jednej tabeli
+ksiazki <- data_frame()
+for(i in 1:nrow(lista_ksiazek)) {
+  ksiazka <- read_lines(as.character(lista_ksiazek[i, "plik"]))
+  ksiazka <- tbl_df(ksiazka) %>%
+     rename(text = value) %>%
+     mutate(tytul = as.character(lista_ksiazek[i, "tytul"]),
+            autor = as.character(lista_ksiazek[i, "autor"]))
+
+  ksiazki <- rbind(ksiazki, ksiazka)
+}
+
+# usuwamy śmieci tymczasowe
+rm(ksiazka, lista_ksiazek, i)
+
+# usunięcie pustych linii
+ksiazki <- filter(ksiazki, nchar(text) != 0)
+```
+
+Mamy więc wielką tabelę, zobaczmy co można powiedzieć o książkach.
+
+
+## Najpopularniejsze słowa w książąkach
+
+Autora można rozpoznać między innymi po tym jakich słów używa. Pojedynczych słów lub ich zbitek. Można też analizować na przykład długość zdań (liczbę wyrazów w zdaniu). Zajmijmy się częstością użycia słów. Będziemy potrzebować takich danych, tak więc każdy wiersz rozbijemy na pojedyncze słowa:
+
+
+```{r words, message=FALSE, warning=FALSE, error=FALSE}
+words <- ksiazki %>%
+  unnest_tokens(words, text, token = "words") %>%
+  # bez stop-words
+  filter(!words %in% pl_stop_words) %>%
+  # bez liczb
+  # jeśli zamiana na liczbę da NA to znaczy że to nie liczba
+  filter(is.na(as.numeric(words))) %>%
+  count(autor, tytul, words) %>%
+  ungroup() %>%
+  group_by(tytul) %>%
+  mutate(proc = 100*n/sum(n)) %>%
+  ungroup() %>%
+  # zmniejszym tabele usuwając słowa występujące tylko raz w książce
+  # zostanie jakieś 37% danych
+  filter(n > 1)
+```
+
+Zobaczmy jak to wygląda - jakie słowa w poszczególnych książkach są najpopularniejsze?
+
+```{r words_clouds, message=FALSE, warning=FALSE, error=FALSE, fig.height=8, fig.width=8}
+by(words,
+   words$tytul,
+   function(x) {
+     wordcloud(x$words, x$n,
+               max.words = 100,
+               scale = c(3.8, 0.6),
+               colors = RColorBrewer::brewer.pal(9, "Greens")[4:9])
+     text(0.05, 0.95,
+          paste0(unique(x$autor), " - \"", unique(x$tytul), "\""),
+          col="darkred", cex=1,  adj=c(0,0))
+     cat("\n")
+   }
+)
+```
+
+Chmurki są fajne, ale nie da się łatwo porównać popularności poszczególnych słów. Zestawmy po 20 najpopularniejszych słów z każdej z książek ze sobą, na jednym wykresie:
+
+```{r words_top20a, message=FALSE, warning=FALSE, error=FALSE}
+words %>%
+  group_by(tytul) %>%
+  top_n(20, wt = proc) %>%
+  ungroup() %>%
+  # zabieg, żeby słowa były w porządku alfabetycznym od góry
+  mutate(words = factor(words, levels = rev(sort(unique(words))))) %>%
+  ggplot() +
+  geom_bar(aes(words, proc, fill=tytul), stat="identity") +
+  facet_wrap(~tytul, nrow = 1) +
+  coord_flip() +
+  theme(legend.position = "none") +
+  labs(x="Słowo", y="Udział procentowy w tekście")
+```
+
+No tutaj widać już o wiele więcej. Na przykład widać, że:
+
+* **Szacki** występuje tylko trzech w książkach (*Uwikłanie*, *Gniew* oraz *Ziarno prawdy* - wiemy, że to książki Miłoszewskiego), tak jak **Teodor**
+* i w dodatku w tych trzech książkach występuje jakiś **prokurator**
+* **Chyłka** występuje u trzech książkach (*Rewizja*, *Zaginięcie*, *Kasacja* - książki Mroza), podobnie **Joanna** (bo może to Joanna Chyłka?), **Kordian** i **Oryński** - czyżby to imiona bohaterów (ksiązki jeszcze nie czytałem, przypominam)
+* **Olsen** występuje w "Enklawie" - pasuje do autora książki Ove Løgmansbø, podobnie jak **Hallbjorn**, **Ellegaard** czy **Sigvald**. Pewnie znowu bohaterowie
+* **obraz** jest tylko w "Bezcennym" - czyżby o jakimś obrazie była ta książka? Słowo **sztuki** też naprowadza na taki trop
+
+Ale są ciekawostki, które naprowadzają na autorstwo:
+
+* **zapytał** oraz **zapytała** są o wiele częściej w ksiązkach Mroza i "Enklawie" niż u Miłoszewskiego
+* podobnie jest z **głową**
+* **pomyślał** załapało się tylko u Miłoszewskiego - w *Gniwei* i w *Uwikłaniu*
+
+Można tak dalej, słowo po słowie. Zobaczmy to samo nieco inaczej zaprezentowane:
+
+
+```{r words_top20b, message=FALSE, warning=FALSE, error=FALSE, fig.width=8, fig.height=14}
+words %>%
+  group_by(tytul) %>%
+  top_n(20, wt = proc) %>%
+  ungroup() %>%
+  group_by(words) %>%
+  mutate(p = mean(proc)) %>%
+  ungroup() %>%
+  arrange(p) %>%
+  mutate(words = factor(words, levels=unique(words))) %>%
+  ggplot() +
+  geom_point(aes(words, proc, color=tytul)) +
+  coord_flip() +
+  facet_wrap(~autor, ncol = 2, scales = "free_x") +
+  labs(x="Słowo", y="Udział procentowy w tekście", color="Tytuł książki")
+```
+
+Bez wnikania w szczegóły (poszczególne słowa) widać od razu, że wykresy **Nieznany_A** oraz **Zygmunt Miłoszewski** mają zagęszczenie punktów w dolnej części wykresów, a w tych samych miejscach **Nieznany_B** oraz **Remigiusz Mróz** mają raczej pusto. Analogicznie (ale odwrotnie - Nieznany_A i Miłoszewski mają mniej, Mróz i Nieznany_B mają więcej) jest w środkowej części wykresów.
+
+
+Weźmy teraz 
+
+## słowa, które występują we wszystkich książkach
+
+i skupmy się na nich.
+
+```{r common_words, message=FALSE, warning=FALSE, error=FALSE}
+common_words <- words %>%
+  group_by(words) %>%
+  mutate(n_ksiazek = n()) %>%
+  ungroup() %>%
+  filter(n_ksiazek == liczba_ksiazek) %>%
+  # średni udział słów na autora
+  group_by(autor, words) %>%
+  summarise(proc = mean(proc)) %>%
+  ungroup()
+
+# zmiana nazwisk, żeby kolumny się przyjemniej nazywało w kodzie
+common_words$autor <- ifelse(common_words$autor == "Remigiusz Mróz",
+                             "Mroz", common_words$autor)
+common_words$autor <- ifelse(common_words$autor == "Zygmunt Miłoszewski",
+                             "Miloszewski", common_words$autor)
+
+# pivot
+common_words <- spread(common_words, autor, proc)
+```
+
+Mając tak przygotowane dane może wreszcie odpowiemy na pytanie
+
+## Kto napisał tę książkę?
+
+Trochę już co prawda wywnioskowaliśmy (pamiętacie - NieznanyA to pewnie Miłoszewski, zaś NieznanyB to Mróz), ale sprawdźmy to jakimiś twardymi liczbami.
+
+
+Na początek najprostrza rzecz, czyli
+
+## metoda korelacji
+
+```{r correlation, message=FALSE, warning=FALSE, error=FALSE, fig.height=6, fig.width=6}
+library(corrgram)
+corrgram(common_words, lower.panel = panel.shade, upper.panel = panel.cor)
+```
+
+Z macierzy korelacji widać, że największe współczynniki mają pary **Nieznany_A - Miłoszewski** oraz **Nieznany_B - Mróz**.
+
+Książka napisana przez *Nieznany_A* to
+**`r as.character(unique(ksiazki[ksiazki$autor == "Nieznany_A", "tytul"]))`**
+ zaś *Nieznany_B* jest autorem **`r as.character(unique(ksiazki[ksiazki$autor == "Nieznany_B", "tytul"]))`**. Zgada się, prawda?
+ 
+ 
+Teraz spróbujmy inaczej.
+
+## Statystyka
+
+Proponuję metodę, gdzie oprzemy się na najmniejszej odległości (różnicy) między częstością słów w tekście (ich procentowym udziałem). A takie odległości potraktujemy statystycznymi miarami - średnią, medianą i odchyleniem standardowym i porównamy te współczynniki. Tak sobie wymyśliłem, nie wiem czy się sprawdzi.
+
+```{r statistic, message=FALSE, warning=FALSE, error=FALSE, fig.width=6, fig.height=6}
+common_words %>%
+   # liczymy bezwzględne odległości pomiędzy udziałem słów
+   # w poszczególnych parach autorów - nieznani ze znanymi
+   mutate(NA_Miloszewski = abs(Nieznany_A - Miloszewski),
+          NB_Miloszewski = abs(Nieznany_B - Miloszewski),
+          NA_Mroz = abs(Nieznany_A - Mroz),
+          NB_Mroz = abs(Nieznany_B - Mroz)) %>%
+   select(NA_Miloszewski, NA_Mroz, NB_Miloszewski, NB_Mroz) %>%
+   # dla każdej z odległości liczymy podstawowe współczynniki statystyczne:
+   # średnią, medianę i odcyhlenie standartowe
+   map_df(.f = function(x) {
+      data_frame(srednia = mean(x),
+                 mediana = median(x), 
+                 odchylenie_std = sd(x))
+      },
+      .id = "para") %>%
+   # unpivot tabeli na trzech potrzeby wykresu
+   gather(key="key", value="val", srednia, mediana, odchylenie_std) %>%
+   # liczby są małe to je skalujemy
+   mutate(val = 1000 * val) %>%
+   # wykres
+   ggplot() +
+   geom_bar(aes(para, val), stat="identity",
+            fill="lightgreen", color="darkgreen") +
+   # liczby, żeby było łatwiej porównać wielkość słupków
+   geom_text(aes(para, val, label=round(val, 2)), hjust = 1.2) +
+   facet_wrap(~key, ncol=3) +
+   coord_flip() +
+   labs(x="Para autorów", y="")
+```
+
+Interesują nas najmniejsze wartości - to oznacza najmniejszą różnicę. Z wykresu widać, że najmniejsze wartości dla każdego z czynników mają pary **NA_Miłoszewski** oraz **NB_Mróz**.
+
+czyli dokładnie tak samo jak wcześniej! Znowu się udało! To już kolejny raz, **zagadka** chyba **rozwiązana**?
+
+
+## bi-gramy
+
+Jak już mamy dane to zobaczmy jakie są napopularniejsze dwuzyrazowe zbitki w poszczególnych książkach:
+
+```{r bigrams, message=FALSE, warning=FALSE, error=FALSE, fig.height=8, fig.width=8}
+biwords <- ksiazki %>%
+   unnest_tokens(words, text, token = "ngrams", n=2) %>%
+   separate(words, c("word1", "word2")) %>%
+   filter(!word1 %in% pl_stop_words, is.na(as.numeric(word1))) %>%
+   filter(!word2 %in% pl_stop_words, is.na(as.numeric(word2))) %>%
+   unite(words, word1, word2, sep = " ") %>%
+   count(tytul, autor, words) %>%
+   ungroup()
+
+by(biwords,
+   biwords$tytul,
+   function(x) {
+     wordcloud(x$words, x$n,
+               max.words = 50,
+               scale = c(3.0, 0.6),
+               colors = RColorBrewer::brewer.pal(9, "Greens")[4:9])
+     text(0.05, 0.95,
+          paste0(unique(x$autor), " - \"", unique(x$tytul), "\""),
+          col="darkred", cex=1,  adj=c(0,0))
+     cat("\n")
+   }
+)
+```
+
+
+
+Zróbmy to samo dla trójek wyrazów, czyli
+
+## tri-gramy
+
+```{r trigrams_a, message=FALSE, warning=FALSE, error=FALSE}
+triwords <- ksiazki %>%
+  unnest_tokens(words, text, token = "ngrams", n=3) %>%
+  separate(words, c("word1", "word2", "word3")) %>%
+  filter(!word1 %in% pl_stop_words, is.na(as.numeric(word1))) %>%
+  filter(!word2 %in% pl_stop_words, is.na(as.numeric(word2))) %>%
+  filter(!word3 %in% pl_stop_words, is.na(as.numeric(word3))) %>%
+  unite(words, word1, word2, word3, sep = " ") %>%
+  count(tytul, autor, words) %>%
+  ungroup()
+```
+
+Usuwamy trójki, które występuja najczęściej w każdej z książek (wcześniej obejrzałem te same chmurki bez filtrowania) - żeby obrazki były bardziej czytelne:
+
+```{r trigrams_b, message=FALSE, warning=FALSE, error=FALSE}
+triwords <- filter(triwords, !words %in% c("kancelarii żelazny mcvay",
+                                           "argentyńska saska kępa",
+                                           "ul argentyńska saska",
+                                           "prokurator teodor szacki"))
+```
+
+Pierwsza trójka usuniętych to książki Mroza (bez *Enklawy*), ostatnia - to oczywiście Miłoszewski (bez *Bezcennego*). Rysujemy takie wyczyszczone chmurki:
+
+```{r trigrams_c, message=FALSE, warning=FALSE, error=FALSE, fig.height=8, fig.width=8}
+by(triwords,
+   triwords$tytul,
+   function(x) {
+     wordcloud(x$words, x$n,
+               max.words = 50,
+               scale = c(3.0, 0.6),
+               colors = RColorBrewer::brewer.pal(9, "Greens")[4:9])
+     text(0.05, 0.95,
+          paste0(unique(x$autor), " - \"", unique(x$tytul), "\""),
+          col="darkred", cex=1,  adj=c(0,0))
+     cat("\n")
+   }
+)
+```
+

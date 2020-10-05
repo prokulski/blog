@@ -1,0 +1,763 @@
+---
+title: "Sejm VIII kadencji"
+author: "Łukasz Prokulski"
+date: "`r Sys.Date()`"
+output: 
+  html_document: 
+    fig_width: 10
+    fig_height: 8
+    fig_align: "center"
+    self_contained: no
+---
+
+```{r document_setup, echo=FALSE, message=FALSE, error=FALSE, warning=FALSE}
+library(tidyverse)
+library(knitr)
+library(kableExtra)
+
+# chunks options
+opts_chunk$set(message = FALSE, error = FALSE, warning = FALSE, echo = FALSE)
+options(knitr.table.format = "html") 
+
+source("/home/lemur/RProjects/!Rmarkdown_templates/da_plot.R")
+```
+
+```{r}
+library(tidyverse)
+library(lubridate)
+library(widyr)
+library(Rtsne)
+library(dbscan)
+library(randomcoloR)
+```
+
+```{r}
+lista_glosowan <- readRDS("final_lista_glosowan.RDS")
+glosowania <- readRDS("final_glosowania.RDS")
+
+klub_osoba <- glosowania %>% distinct(klub, osoba)
+```
+```{r}
+subtitle <- sprintf("Dane szczątkowe (%d głosowań z %d ~= %.1f%%)", n_distinct(glosowania$id_glosowania), nrow(lista_glosowan), 100 * n_distinct(glosowania$id_glosowania) / nrow(lista_glosowan))
+```
+
+
+Wybory parlamentarne 2019 dobiegły końca, a co za tym idzie mamy zmianę kadencji Sejmu. Podsumujmy więc mijającą, ósmą kadencję Sejmu Rzeczpospolitej Polskiej. Kiedy głosowali posłowie, o jakich porach dnia i nocy? Kto był najczęściej nieobecny?
+
+
+Niniejszy wpis pokaże Wam jakieś ogólne, dość przekrojowe statystyki. Sądzę, że to dobry materiał wyjściowy dla redakcji informacyjnych. Można poszerzyć analizę o dodanie innych źródeł, szczególnie doniesień prasowych. Ale niech zajmą się tym dziennikarze, a nie analitycy. Mogę pomóc, **dogadamy się** (po ile teraz wierszówka? a research?).
+
+Same wybory *robi* każdy, więc *nie robię* ich ja. Bo po co robić to samo? Świetnie robią to blogi [WB data](https://wbdata.pl/blog/) (polecam zarówno blog oraz fanpage) oraz [Wybory na mapie](http://www.wyborynamapie.pl/) (chociaż z minionymi nie zrobili nic), ekipa [BIQData](http://biqdata.wyborcza.pl/) z Czerskiej też daje radę. Ja przed wyborami robiłem jakieś proste statystyki dotyczące kandydatów - przeglądając [mojego Twittera](https://twitter.com/lemur78) możecie je znaleźć (szukaj w okolicach 10-12 września).
+
+Kiedyś [analizowałem Sejm VII kadencji](/index.php/2017/04/22/sejm-viii-kadencji/) korzystając ze szczątkowych danych znalezionych gdzieś w sieci, a tym razem postanowiłem dane zebrać samodzielnie.
+
+Sam proces zbierania danych dzisiaj pominiemy (ale mam w planie coś na ten temat, o ile czas pozwoli) i zajmiemy się zgromadzonymi wynikami.
+
+Zacznijmy od liczby głosowań. `r subtitle`, które zebrałem nie są pełne, ale są na tyle duże że można pokusić się o jakieś wnioski. Zabrakło kilku głosowań - tych, które nie są typowymi głosowaniami *za lub przeciw* (na przykład [głosowanie na szefa NIK](http://sejm.gov.pl/Sejm8.nsf/agent.xsp?symbol=glosowaniaL&NrKadencji=8&NrPosiedzenia=85&NrGlosowania=36)) albo przeprowadzone zostały w nietypowych warunkach - na przykład [te z 16 grudnia 2016](http://sejm.gov.pl/Sejm8.nsf/agent.xsp?symbol=listaglos&IdDnia=157) po godzinie 16 (polecam [zapis z sali obrad](http://sejm.gov.pl/Sejm8.nsf/transmisja.xsp?documentId=BBD0BCDEC4532500C125808B0071DB52&symbol=STENOGRAM_TRANSMISJA), przewiń na okolice godziny 15).
+
+
+Pamiętać proszę o jeszcze jednym. Głosowań jest bardzo dużo, ale samych ustaw wcale tyle nie musi być. Głosuje się za przyjęciem tej czy innej poprawki (bądź jej odrzuceniem; samych poprawek są tysiące). Głosuje się za ogłoszeniem przerwy w obradach albo za przekazaniem materiału do dalszych prac w komisjach. Wyjęcie konkretnych ustaw jest robotą właściwie ręczną. To praca dla dziennikarzy.
+
+
+Tak czy inaczej - na poniższym wykresie możemy zobaczyć (zagregowaną do tygodnia) liczbę głosowań na kolejnych posiedzeniach. Widać pojedyncze *piki* (warto by je zestawić z tematami głosowań i doniesieniami prasowymi), ale widać też urlopy około sierpniowe:
+
+```{r sejm8_01, fig.width=10, fig.height=6}
+p <- lista_glosowan %>%
+  mutate(data_posiedzenia = floor_date(data_posiedzenia, "weeks")) %>%
+  count(data_posiedzenia) %>%
+  ggplot() +
+  geom_area(aes(data_posiedzenia, n), color = "blue", fill = "lightblue") +
+  labs(title = "Liczba głosowań Sejmu VIII kadencji w kolejnych tygodniach",
+       x = "Data posiedzenia", y = "Liczba głosowań w tygodniu",
+       caption = "(c) Łukasz Prokulski, fb.com/DaneAnalizy")
+
+da_plot(p)
+```
+
+
+Ciekawsze, szczególnie w tej kadencji, są jednak pory głosowań. Zobaczmy kilka przekrojów:
+
+```{r sejm8_02, fig.width=10, fig.height=6}
+p <- lista_glosowan %>%
+  count(godzina) %>%
+  ggplot() +
+  geom_col(aes(godzina, n), color = "blue", fill = "lightblue") +
+  labs(title = "Liczba głosowań Sejmu VIII kadencji w zależności od godziny głosowania",
+       x = "Godzina głosowania", y = "Liczba głosowań",
+       caption = "(c) Łukasz Prokulski, fb.com/DaneAnalizy")
+
+da_plot(p)
+```
+
+Globalnie rzecz biorąc w Sejmie głosuje się w godzinach przedpołudniowych (posiedzenia zaczynają się zwykle około 9 lub 9:30 - zapewne regulamin Sejmu coś na ten temat mówi) i wieczorem (mam na myśli okolice 19-21). Są też nocne głosowania, w czym VIII kadencja Sejmu się wyspecjalizowała...
+
+
+Zobaczmy godziny głosowań nałożone na oś czasu:
+
+```{r sejm8_03}
+p <- lista_glosowan %>%
+  count(data_posiedzenia, godzina) %>%
+  ggplot() +
+  geom_point(aes(data_posiedzenia, godzina, size = n, color = n), alpha = 0.9) +
+  scale_color_distiller(palette = "YlOrRd", direction = 1) +
+  scale_y_reverse() +
+  guides(size = "none") +
+  labs(title = "Liczba głosowań Sejmu VIII kadencji w zależności od pory dnia",
+       x = "Data posiedzenia", y = "Godzina głosowania",
+       color = "Liczba\ngłosowań",
+       caption = "(c) Łukasz Prokulski, fb.com/DaneAnalizy")
+
+da_plot(p, legend_bottom = TRUE)
+```
+
+Te nocne głosowania są nieco zbieżne z okresami, kiedy było w ogóle dużo głosowań. Znowu materiał dla dziennikarzy: czy to fakt? jakie rzeczy były wówczas głosowane?
+
+W rozkładzie godzin w poszczególnych dniach tygodnia:
+
+```{r sejm8_04}
+p <- lista_glosowan %>%
+  mutate(wday = wday(data_posiedzenia, week_start = 1, label = TRUE)) %>%
+  count(wday, godzina) %>%
+  ggplot() +
+  geom_tile(aes(wday, godzina, fill = n), color = "gray30") +
+  scale_fill_distiller(palette = "YlOrRd", direction = 1) +
+  scale_y_reverse() +
+  theme(legend.position = "right") +
+  labs(title = "Liczba głosowań Sejmu VIII kadencji w zależności od dnia tygodnia i pory dnia",
+       x = "", y = "Godzina", fill = "Liczba\ngłosowań",
+       caption = "(c) Łukasz Prokulski, fb.com/DaneAnalizy")
+
+da_plot(p)
+```
+
+widać standard pracy - posiedzenia najczęściej zaczynają się w środy lub czwartki i trwają dwa lub trzy dni. Wyobrażam sobie, że w normalnych warunkach, rzetelnej pracy nad prawem proces wygląda następująco:
+
+* poniedziałek i wtorek to praca w komisjach nad projektami ustaw
+* środa i kawałek czwartku to debata wszystkich posłanek i posłów, zgłoszenie ewentualnych poprawek i tym podobne działania
+* na koniec czwartku, już po debacie, następuje głosowanie - zapewne nad poprawkami
+* w piątek powinno nastąpić czytanie finalnego projektu ustawy i głosowanie nad całością
+
+Jak to wygląda w praktyce mamy na co dzień okazję oglądać w wiadomościach... Mimo to powyższy obraz pokazuje, że w teorii ten proces tak właśnie wygląda: mało głosowań na początku tygodnia, czerwono pod koniec. No i nocne głosowania głównie w czwartki.
+
+
+Kolejny element to przepływ posłów z klubu do klubu. Łączenie się klubów, zmiany nazw i tym podobne roszady. Proszę bardzo:
+
+```{r sejm8_05}
+p <- glosowania %>%
+  count(klub, id_glosowania) %>%
+  left_join(lista_glosowan %>% select(id_glosowania, data_posiedzenia),
+            by = "id_glosowania") %>%
+  mutate(data_posiedzenia = floor_date(data_posiedzenia, "week")) %>%
+  group_by(klub, data_posiedzenia) %>%
+  summarise(n=mean(n)) %>%
+  ungroup() %>%
+  mutate(klub = fct_reorder(klub, n)) %>%
+  ggplot() +
+  geom_point(aes(data_posiedzenia, klub, size = n)) +
+  scale_size_continuous(range = c(0.5, 3)) +
+  theme_minimal() +
+  theme(legend.position = "bottom") +
+  labs(title = "Liczność klubów Sejmu VIII kadencji",
+       x = "", y = "", size = "Liczba członków klubu",
+       caption = "(c) Łukasz Prokulski, fb.com/DaneAnalizy")
+
+da_plot(p, legend_bottom = TRUE)
+```
+
+[Wykres strumienowy](https://pl.wikipedia.org/wiki/Wykres_Sankeya) (z angielska Senkey diagram) byłby tutaj pewnie lepszy.
+
+Co widzimy? Stabilność klubu PiS. Zmiany w PSL oraz .Nowoczesnej. Oraz wyraźne pojawienie się PO-KO z okazji wyborów do Europarlamentu.
+
+
+Wszystko do tej pory to dość *łagodne* informacje. Ciekawsze jest kto nie wykonuje stosunku pracy i po prostu nie przychodzi na głosowania. Najpierw na grubo: liczymy ile jakich głosów (a do wyboru mamy cztery typy głosów: za, przeciw, wstrzymujący i nieobecny) oddał w całej swojej historii każdy z członków klubu i wybieramy z tego nieobecności:
+
+```{r sejm8_06}
+p <- glosowania %>%
+  count(glos, klub) %>%
+  group_by(klub) %>%
+  mutate(p = 100*n/sum(n)) %>%
+  ungroup() %>%
+  filter(glos == "Nieobecny") %>%
+  mutate(klub = fct_reorder(klub, p)) %>%
+  ggplot() +
+  geom_col(aes(klub, p), fill = "lightblue", color = "blue") +
+  geom_text(aes(klub, p, label = sprintf("%.1f%%", p)), color = "gray20", hjust = 1, vjust = 0.5, size = 3) +
+  coord_flip() +
+  theme_minimal() +
+  labs(title = "Procent absencji na głosowaniach Sejmu VIII kadencji wg klubów",
+       x = "Klub", y = "% nieobecności",
+       caption = "(c) Łukasz Prokulski, fb.com/DaneAnalizy")
+
+da_plot(p)
+```
+
+To jest trochę tricky ujęcie. Klub **W-S** składający się z trzech posłów (`r glosowania %>% filter(klub == "W-S") %>% count(osoba) %>% pull(osoba) %>% sort() %>% paste(collapse = ", ")`) ma *łatwiej* w osiągnięciu wysokiego stopnia nieobecności. Wystarczy, że jeden z posłów będzie głównie nieobecny, a już robi się jedna trzecia nieobecności całego klubu. Dodatkowo klub **W-S** nie był obecny przez całą kadencję (powstał gdzieś jesienią 2018 i przestał istnieć w połowie 2019 - do sprawdzenia samodzielnie dlaczego tak się działo).
+
+Ale i duże dość stabilne kluby mają *swoje za uszami*. Posłowie klubu PiS powinni właściwie oddać prawie 5% (uśredniając po wszystkich) swoich zarobków za brak pracy. PO 9%, a w koalicji PO-KO nawet prawie 11%. 
+
+
+Jak to wygląda w przypadku poszczególnych posłów? Zobaczmy pierwszą trzydziestkę największych wagarowiczów:
+
+```{r sejm8_07a}
+p <- glosowania %>%
+  count(osoba, glos) %>%
+  group_by(osoba) %>%
+  mutate(p = 100*n/sum(n)) %>%
+  ungroup() %>%
+  filter(glos == "Nieobecny") %>%
+  top_n(30, p) %>%
+  mutate(osoba = fct_reorder(osoba, p)) %>%
+  ggplot() +
+  geom_col(aes(osoba, p), fill = "lightblue", color = "blue") +
+  geom_text(aes(osoba, p, label = sprintf("%.1f%%", p)), color = "gray20", hjust = 1, vjust = 0.5, size = 3) +
+  coord_flip() +
+  theme_minimal() +
+  labs(title = "Procent absencji na głosowaniach Sejmu VIII kadencji wg posłów",
+       x = "", y = "% nieobecności",
+       caption = "(c) Łukasz Prokulski, fb.com/DaneAnalizy")
+
+da_plot(p)
+```
+
+Zapewne z czegoś te nieobecności wynikają. Zapewne są usprawiedliwione... Poseł [Tomasz Tomczykiewicz](https://pl.wikipedia.org/wiki/Tomasz_Tomczykiewicz) zmarł podczas trwania kadencji w wyniku choroby nerek. Analogicznie [Artur Górski](https://pl.wikipedia.org/wiki/Artur_G%C3%B3rski_(1970%E2%80%932016)), ale [Marian Zembala](https://pl.wikipedia.org/wiki/Marian_Zembala) żyje.
+
+Na liście mamy też wspomnianych już Jacka Wilka (33% nieobecności) oraz Jakuba Kuleszę (25%). Już wiecie skąd wyniki W-S wyżej? Statystyka...
+
+
+Żeby oddać cześć *przodownikom pracy* zobaczmy najpilniejszych trzydziestu:
+
+```{r sejm8_07b}
+p <- glosowania %>%
+  count(osoba, glos) %>%
+  group_by(osoba) %>%
+  mutate(p = 100*n/sum(n)) %>%
+  ungroup() %>%
+  filter(glos == "Nieobecny") %>%
+  top_n(-30, p) %>%
+  mutate(osoba = fct_reorder(osoba, -p)) %>%
+  ggplot() +
+  geom_col(aes(osoba, p), fill = "lightblue", color = "blue") +
+  geom_text(aes(osoba, p, label = sprintf("%.2f%%", p)), color = "gray20", hjust = 1, vjust = 0.5, size = 3) +
+  coord_flip() +
+  theme_minimal() +
+  labs(title = "Procent absencji na głosowaniach Sejmu VIII kadencji wg posłów",
+       x = "", y = "% nieobecności",
+       caption = "(c) Łukasz Prokulski, fb.com/DaneAnalizy")
+
+da_plot(p)
+```
+
+Panowie [Jerzy Gosiewski](https://pl.wikipedia.org/wiki/Jerzy_Gosiewski) i [Robert Warwas](https://pl.wikipedia.org/wiki/Robert_Warwas) - szacunek!
+
+
+
+Przeanalizujmy teraz obecność jednego posła. Konkretnego, wybranego losowo, Jarosława Kaczyńskiego (mając zgromadzone dane może to być każdy).
+
+```{r sejm8_08, fig.width=12, fig.height=6}
+wybrana_osoba <- "Kaczyński Jarosław"
+
+p <- glosowania %>%
+  filter(osoba == wybrana_osoba) %>%
+  distinct(id_glosowania, glos) %>%
+  left_join(lista_glosowan %>% select(id_glosowania, data_posiedzenia),
+            by = "id_glosowania") %>%
+  mutate(miesiac = floor_date(data_posiedzenia, "week")) %>%
+  count(glos, miesiac) %>%
+  group_by(miesiac) %>%
+  mutate(p = 100*n/sum(n)) %>%
+  ungroup() %>%
+  filter(glos == "Nieobecny") %>%
+  ggplot() +
+  geom_line(aes(miesiac, p)) +
+  geom_point(aes(miesiac, p)) +
+  labs(title = paste0(wybrana_osoba, ": procent absencji na głosowaniach Sejmu VIII kadencji w kolejnych tygodniach"),
+       x = "", y = "% nieobecności",
+       caption = "(c) Łukasz Prokulski, fb.com/DaneAnalizy")
+
+da_plot(p)
+```
+
+Tutaj zliczamy nieobecność w tygodniowych okresach. Prezes najliczniej reprezentowanej w Sejmie partii zwykle jest w pracy (opuszcza na oko 10% głosowań), ale miał prawie pół roku (pomiędzy kwietniem a sierpniem 2018 roku) przerwy. Było to najprawdopodobniej (o ile pamiętam) spowodowane operacją i późniejszą rehabilitacją (dziennikarze: sprawdzić).
+
+
+Sprawdźmy jeszcze czy godzina głosowania przekłada się ogólnie (u wszystkich) na nieobecność?
+
+```{r sejm8_09, fig.width=10, fig.height=6}
+p <- glosowania %>%
+  count(glos, id_glosowania) %>%
+  left_join(lista_glosowan %>% select(id_glosowania, godzina),
+            by = "id_glosowania") %>%
+  group_by(godzina, glos) %>%
+  summarise(n = sum(n)) %>%
+  ungroup() %>%
+  group_by(godzina) %>%
+  mutate(p = 100*n/sum(n)) %>%
+  ungroup() %>%
+  filter(glos == "Nieobecny") %>%
+  ggplot() +
+  geom_col(aes(godzina, p), fill = "lightblue", color = "blue") +
+  labs(title = "Absencja na głosowaniach Sejmu VIII kadencji wg godziny głosowania",
+       x = "", y = "% nieobecności",
+       caption = "(c) Łukasz Prokulski, fb.com/DaneAnalizy")
+
+da_plot(p)
+```
+
+Przekłada się, oczywiście. Nie każdy ma ochotę głosować po nocy. Dokładniej rzecz biorąc 11.2% *głosów* oddanych pomiędzy 2:00 a 2:59 w nocy to *nieobecność*. Obiady jada się w Sejmie o 15, a kolacje - o 20. Przynajmniej tak można wnioskować po nieobecności na głosowaniach w tych godzinach.
+
+Czy nasz losowo wybrany poseł Kaczyński wpisuje się w ten trend?
+
+```{r sejm8_10, fig.width=18, fig.height=10}
+p <- glosowania %>%
+  filter(osoba == wybrana_osoba) %>%
+  left_join(lista_glosowan %>% select(id_glosowania, godzina, data_posiedzenia),
+            by = "id_glosowania") %>%
+  mutate(ym = floor_date(data_posiedzenia, "1 month")) %>%
+  count(ym, godzina, glos) %>%
+  group_by(ym, godzina) %>%
+  mutate(p = 100*n/sum(n)) %>%
+  ungroup() %>%
+  filter(glos == "Nieobecny") %>%
+  ggplot() +
+  geom_point(aes(ym, godzina, size = p, color = p), alpha = 0.9) +
+  scale_color_distiller(palette = "YlOrRd", direction = 1) +
+  scale_y_reverse() +
+  guides(size = "none") +
+  labs(title = paste0(wybrana_osoba, ": procent absencji na głosowaniach Sejmu VIII kadencji wg godziny głosowania"),
+       x = "", y = "Godzina głosowania", color = "% nieobecności",
+       caption = "(c) Łukasz Prokulski, fb.com/DaneAnalizy")
+
+da_plot(p)
+```
+
+Poseł Kaczyński jest raczej sumiennym posłem, nawet w nocy.
+
+
+A teraz zobaczmy czy są posłowie wyłamujący się z głosu klubu. Policzmy dla każdego głosowania jak głosowała większość klubu (nie licząc nieobecności) i znajdźmy takich, którzy głosowali inaczej. A potem policzmy w ilu głosowaniach głosowali inaczej.
+
+```{r sejm8_11}
+p <- glosowania %>%
+  select(id_glosowania, klub, osoba, glos) %>%
+  left_join(glosowania %>%
+              count(id_glosowania, klub, glos) %>%
+              filter(glos != "Nieobecny") %>%
+              group_by(id_glosowania, klub) %>%
+              top_n(1, n) %>%
+              ungroup() %>%
+              select(-n) %>%
+              rename(glos_klubu = glos),
+            by = c("id_glosowania", "klub")
+  ) %>%
+  group_by(osoba) %>%
+  mutate(n_glosowan = n()) %>%
+  ungroup() %>%
+  filter(glos != glos_klubu) %>%
+  filter(glos != "Nieobecny") %>%
+  filter(klub != "niez.") %>%
+  count(klub, osoba, n_glosowan, sort = TRUE) %>%
+  mutate(p_roznic = 100*n/n_glosowan) %>%
+  group_by(klub) %>%
+  top_n(3, p_roznic) %>%
+  # filter(p_roznic > quantile(p_roznic, 0.95)) %>%
+  ungroup() %>%
+  mutate(osoba = fct_reorder(osoba, p_roznic)) %>%
+  ggplot() +
+  geom_col(aes(osoba, p_roznic, fill = klub), show.legend = FALSE) +
+  coord_flip() +
+  theme_minimal() +
+  facet_wrap(~klub, scales = "free", ncol = 3) +
+  labs(title = "Osoby, które głosowały inaczej niż klub",
+       x = "", y = "% głosowań z odmiennym głosem",
+       caption = "(c) Łukasz Prokulski, fb.com/DaneAnalizy")
+
+da_plot(p)
+```
+
+Oś X dla każdego z małych wykresików jest różna (aby było widać różnice), więc należy czytać także ją. Najbardziej niezgodny z klubem macierzystym był [Rafał Wójcikowski](https://pl.wikipedia.org/wiki/Rafa%C5%82_W%C3%B3jcikowski) - w 1/5 głosowań głosował inaczej niż większość klubu Kukiz'15. W pozostałych dużych klubach mamy:
+
+* PO - Bogusław Sonik (3,27% różnic)
+* PiS - Łukasz Zbonikowski (2,19%)
+* .Nowoczesna - Piotr Misiło (3,29%)
+* PSL (ten podstawowy) - Eugeniusz Kłopotek (4,51%)
+
+
+Wróćmy do naszego losowego posła (można to zrobić dla każdego, pamiętajcie) - jak głosował Kaczyński a jak jego klub?
+
+```{r sejm8_12, fig.width=10, fig.height=6}
+# głosowania klubów i osób
+glosowania_kluby <- glosowania %>%
+  count(id_glosowania, klub, glos) %>%
+  group_by(id_glosowania, klub) %>%
+  mutate(p = 100*n/sum(n)) %>%
+  filter(glos != "Nieobecny") %>%
+  top_n(1, n) %>%
+  mutate(rn = row_number()) %>%
+  ungroup() %>%
+  filter(rn == 1) %>%
+  select(-rn)
+
+glosowania_osoba <- glosowania %>%
+  filter(osoba == wybrana_osoba) %>%
+  select(id_glosowania, glos_osoby=glos) %>%
+  left_join(glosowania_kluby %>%
+              filter(klub %in% (klub_osoba %>%
+                                  filter(osoba == wybrana_osoba) %>%
+                                  distinct(klub) %>%
+                                  pull(klub))) %>%
+              rename(glos_klubu = glos),
+            by = "id_glosowania")
+
+plot_data <- glosowania_osoba %>%
+  count(klub, glos_osoby, glos_klubu) %>%
+  mutate(p = 100*n/sum(n))
+
+zgodnosc <- plot_data %>%
+  mutate(same = glos_osoby == glos_klubu) %>%
+  group_by(same) %>%
+  summarise(p = sum(p)) %>%
+  ungroup() %>%
+  filter(same) %>%
+  pull(p) %>%
+  round(.,1)
+
+p <- plot_data %>%
+  ggplot() +
+  geom_tile(aes(glos_osoby, glos_klubu, fill = p), color = "gray", show.legend = FALSE) +
+  geom_text(aes(glos_osoby, glos_klubu, label=sprintf("%.2f%%", p)), color = "black") +
+  scale_fill_distiller(palette = "YlOrRd", direction = 1) +
+  labs(title = paste0(wybrana_osoba, ": zgodność z głosowaniem klubu: ", zgodnosc, "%"),
+       x = paste0("Głos: ", wybrana_osoba), y = "Uśredniony głos Klubu",
+       caption = "(c) Łukasz Prokulski, fb.com/DaneAnalizy")
+
+da_plot(p)
+```
+
+W 77,9% swoich głosowań oddał dokładnie taki sam głos jak klub (albo klub tak jak on... bo to działa w obie strony). Gdyby odjąć nieobecności (zachowane tutaj umyślnie) wynik ten były zapewne jeszcze wyższy.
+
+
+Teraz ciekawski bardziej analityczne. Które kluby są do siebie podobne? Bierzemy pod uwagę tylko głosy obecnych osób, liczymy ile w poszczególnych głosowaniach głosów na *tak* (oraz *nie* i *wstrzymujących*) oddał każdy z klubów. A potem liczymy współczynniki korelacji pomiędzy poszczególnymi klubami. Może to uproszczenie, ale wynik jest ciekawy:
+
+```{r sejm8_13}
+# korelacja w głosowaniu między osobami i klubami
+corr_plot_data_osoba <- glosowania %>%
+  filter(glos != "Nieobecny") %>%
+  count(osoba, glos) %>%
+  pairwise_cor(osoba, glos, n, use = "complete.obs") %>%
+  filter(item1 < item2)
+
+corr_plot_data_klub <- glosowania %>%
+  filter(glos != "Nieobecny") %>%
+  count(id_glosowania, klub, glos) %>%
+  pairwise_cor(klub, glos, n,  use = "complete.obs") %>%
+  filter(item1 < item2)
+
+
+p <- corr_plot_data_klub %>%
+  ggplot() +
+  geom_tile(aes(item1, item2, fill = correlation), color = "black") +
+  geom_text(aes(item1, item2, label = sprintf("%.2f", correlation)), color = "black") +
+  scale_fill_gradient2(low = "skyblue3", mid = "yellow", high = "firebrick2",  midpoint = 0, limits = c(-1, 1)) +
+  theme(axis.text.x = element_text(angle = 90, hjust = 0, vjust = 0)) +
+  labs(title = "Podobieństwo klubów Sejmu VIII kadencji na podstawie głosowań",
+       x = "", y = "", fill = "Współczynnik korelacji",
+       caption = "(c) Łukasz Prokulski, fb.com/DaneAnalizy")
+
+da_plot(p)
+```
+
+Mamy właściwie trzy obozy: PiS, W-S (tych trzech posłów) i dość spójną resztę.
+
+
+A jak to wygląda między posłami? Kto głosował najbardziej podobnie do Kaczyńskiego?
+
+```{r sejm8_14}
+p <- corr_plot_data_osoba %>%
+  filter(item1 == wybrana_osoba) %>%
+  left_join(klub_osoba, by = c("item2" = "osoba")) %>%
+  rename(klub2 = klub) %>%
+  filter(klub2 %in% (klub_osoba %>%
+                       filter(osoba == wybrana_osoba) %>%
+                       distinct(klub) %>%
+                       pull(klub))) %>%
+  select(item2, klub2, correlation) %>%
+  filter(correlation <= 0.99) %>%
+  arrange(correlation) %>%
+  mutate(item2 = fct_inorder(item2)) %>%
+  ggplot() +
+  geom_col(aes(item2, correlation, fill = klub2)) +
+  coord_flip() +
+  labs(title = paste0(wybrana_osoba, ": podobieństwo z posłami z jej/jego klubu/ów\nw głosowaniach Sejmu VIII kadencji"),
+       subtitle = "Bez posłów o podobieństwie (współczynniku korelacji) >= 0.99",
+       x = "", y = "Współczynnik korelacji", fill = "Klub",
+       caption = "(c) Łukasz Prokulski, fb.com/DaneAnalizy")
+
+da_plot(p)
+```
+
+Na powyższym wykresie zastosowałem pewną manipulację - **nie** pokazałem osób, które głosują dokładnie jak Kaczyński (współczynnik korelacji równy 1), a tylko te prawie dokładne.
+
+Podobnie jak w każdym innym przypadku - można wybrać innego posła i poszukać jemu (bądź jej) podobnych w ramach jej klubu (lub klubów, jeśli wybraniec przewinął się przez kilka).
+
+
+A gdyby tak każdego posła umiejscowić na jakiejś płaszczyźnie i sprawdzić czy tworzą się jakieś wzory związane z przynależnością do klubu? Jak to zrobić?
+
+Policzmy ile razy każda z osób zagłosowała w określony sposób - to da nam dużą tablicę o wymiarach *liczba posłów x 4* (bo mamy 4 warianty głosowania: tak, nie, wstrzymał się i nieobecny). Ale czterech wymiarów nie da się łatwo narysować, więc skorzystamy z metody t-SNE która zredukuje nam wynik do dwóch wymiarów. Dzięki czemu każdy będzie kropką. I ta kropka ma osobny kolor na obrazku poniżej:
+
+
+```{r sejm8_15}
+# t-SNE
+set.seed(2019)
+osoby_glosy <- glosowania %>% count(osoba, glos) %>% spread(glos, n, fill = 0)
+
+tsne <- Rtsne(osoby_glosy[, 2:5], pca = FALSE, perplexity = 15, theta = 0.25)
+
+tsne_df <- as_tibble(tsne$Y) %>%
+  mutate(osoba = osoby_glosy$osoba) %>%
+  left_join(klub_osoba, by = "osoba")
+
+
+dist_palette <- distinctColorPalette(length(unique(tsne_df$klub)), altCol = TRUE)
+
+p <- tsne_df %>%
+  ggplot() +
+  geom_point(aes(V1, V2, color = klub)) +
+  scale_color_manual(values = unname(dist_palette)) +
+  labs(title ="Podobieństwo posłów w głosowaniach Sejmu VIII kadencji",
+       subtitle = "Algorytm t-SNE na podstawie rozkładu głosów posłów",
+       x = "", y = "", color = "Klub",
+       caption = "(c) Łukasz Prokulski, fb.com/DaneAnalizy")
+
+da_plot(p, blank_x = TRUE, blank_y = TRUE)
+```
+
+Kolory dobierają się losowo. Ale widać że są zebrane w jakieś grupy. Mamy z lewej węża PO z przyległościami typu .Nowoczesna. Na dole mamy węża w kształcie U z posłankami i posłami PiSu. Ale są oni też na wyspie po prawej stronie. Pomiędzy nimi mamy posłów z Kukiz'15.
+
+Poniżej wersja interaktywna - możesz najechać na dany punkt i zobaczyć kto się pod nim kryje. I jakich ma sąsiadów.
+
+```{r}
+# plotly
+library(plotly)
+library(htmlwidgets)
+
+dist_palette_df <- tibble(klub = unique(tsne_df$klub), klub_kolor = dist_palette)
+
+plotly_plot <- left_join(tsne_df, dist_palette_df, by = "klub") %>%
+  plot_ly() %>% 
+  add_markers(x =~ V1,
+              y =~ V2,
+              color =~ I(klub_kolor),
+              name =~ I(klub),
+              text =~ paste0(osoba, " (", klub, ")"),
+              hoverinfo = 'text')
+
+saveWidget(plotly_plot,
+           file = "sejm_viii_kadencji.html",
+           selfcontained = TRUE,
+           title = "Sejm VIII kadencji")
+```
+
+
+<iframe src="sejm_viii_kadencji.html" width="100%", height="550px" scrolling="no"></iframe>
+
+Teraz, na tak zredukowanych wymiarach, spróbujmy *poklastrować* punkty. Nie jest to za mądre podejście (bo są tylko cztery wyjściowe wymiary), ale często się tak robi szukając ukrytych grup (szczególnie jak wymiarów wejściowych jest dużo albo bardzo dużo).
+
+Na początek użyjemy algorytmu k-means i założenia, że mamy 8 grup. Teraz kolor to taka grupa znaleziona przez k-means:
+
+```{r sejm8_16}
+tsne_df$kmeans_cluster <- kmeans(tsne_df[,1:2], 8)$cluster
+
+p <- tsne_df %>%
+  ggplot() +
+  geom_point(aes(V1, V2, color = as.factor(kmeans_cluster))) +
+  labs(title ="Podobieństwo posłów w głosowaniach Sejmu VIII kadencji",
+       subtitle = "Algorytm k-means na wyniku t-SNE na podstawie rozkładu głosów posłów",
+       x = "", y = "", color = "Klaster",
+       caption = "(c) Łukasz Prokulski, fb.com/DaneAnalizy")
+
+da_plot(p, blank_x = TRUE, blank_y = TRUE)
+```
+
+Widzimy, że nasze węże porozbijały się na kolory. Gdyby teraz użyć tych kolorów do policzenia do której grupy (koloru) powinien należeć dany klub dostaniemy coś takiego:
+
+```{r sejm8_17}
+p <- tsne_df %>%
+  count(klub, kmeans_cluster) %>%
+  group_by(klub) %>%
+  mutate(p = 100*n/sum(n)) %>%
+  #  top_n(1, p) %>%
+  ungroup() %>%
+  ggplot() +
+  geom_tile(aes(as.factor(kmeans_cluster), klub, fill = p), color = "black") +
+  geom_text(aes(as.factor(kmeans_cluster), klub, label = sprintf("%d (%.1f%%)", n, p))) +
+  scale_fill_distiller(palette = "YlOrRd", direction = 1) +
+  labs(x = "Grupa", y = "Klub", fill = "% przynależności\ndo grupy")
+
+da_plot(p)
+```
+
+Z tego możemy wywnioskować, że w jednej grupie mamy posłów z PSL (*czystego* oraz po transformacjach - PSL-UED i PSL-KP), część .Nowoczesnej oraz po 1/4 PO/PO-KO. Jedna trzecia posłów PO/PO-KO oraz 40% .Nowoczesnej to kolejna spora grupa. PiS dzieli się na trzy grupy, ale właściwie do wszystkich trzech należą prawie wyłącznie posłowie PiS. Ostatnią sporą grupą są posłowie PO/PO-KO.
+
+
+Możemy zastosować inny algorytm do grupowania wyników działania algorytmu t-SNE - oparty na skupieniach DBScan. Dobry tekst o DBScan znajdziecie na [blogu Mateusza Grzyba](https://mateuszgrzyb.pl/dbscan-praktyka/).
+
+```{r sejm8_18}
+tsne_df$dbscan_cluster <- dbscan(tsne_df[,1:2], eps = 3, minPts = 2)$cluster
+
+p <- tsne_df %>%
+  ggplot() +
+  geom_point(aes(V1, V2, color = as.factor(dbscan_cluster))) +
+  labs(title ="Podobieństwo posłów w głosowaniach Sejmu VIII kadencji",
+       subtitle = "Algorytm DBScan na wyniku t-SNE na podstawie rozkładu głosów posłów",
+       x = "", y = "", color = "Klaster",
+       caption = "(c) Łukasz Prokulski, fb.com/DaneAnalizy")
+
+da_plot(p, blank_x = TRUE, blank_y = TRUE)
+```
+
+Grupy tym razem są bardziej spójne z kształtem naszych *węży*. Jednocześnie powstało ich więcej. Podzielmy posłów podobnie jak poprzednio:
+
+```{r sejm8_19}
+p <- tsne_df %>%
+  count(klub, dbscan_cluster) %>%
+  group_by(klub) %>%
+  mutate(p = 100*n/sum(n)) %>%
+  #  top_n(1, p) %>%
+  ungroup() %>%
+  ggplot() +
+  geom_tile(aes(dbscan_cluster, klub, fill = p), color = "black") +
+  geom_text(aes(dbscan_cluster, klub, label = sprintf("%d\n(%.1f%%)", n, p)), size = 3) +
+  scale_fill_distiller(palette = "YlOrRd", direction = 1) +
+  labs(x = "Grupa", y = "Klub", fill = "% przynależności\ndo grupy")
+
+da_plot(p)
+```
+
+W takim ujęciu PiS podzielił się na kilka *obozów*, ale w dużym uproszczeniu wszystkie składają się tylko z PiSu. Duże obozy tworzą .N, PO/PO-KO, PSL (z przyległościami) - jako jeden obóz oraz połowa posłów PO/PO-KO jako drugi. Kukiz'15 tworzy obóz z Konfederacją. Jak widać matematyka potrafi odwzorować istniejące granice na polskiej scenie politycznej. Oczywiście są one widoczne bo istnieją, a nie istnieją bo tak mówi matematyka.
+
+```{r}
+# przygotowanie tabeli korelacji pomiędzy dwoma osobami po kolejnych głosowaniach
+make_two_correlation <- function(para) {
+  
+  glosowania_tmp <- glosowania %>%
+    filter(glos != "Nieobecny") %>%
+    filter(osoba %in% para)
+  
+  nr_glosowan <- sort(unique(glosowania$id_glosowania))
+  
+  corr_total <- tibble()
+  
+  # j <- 0
+  #l <- length(nr_glosowan)
+  
+  for(i in nr_glosowan) {
+    
+    # j <- j + 1
+    # cat(paste0("\r", j, " / ", l))
+    
+    corr_osoba_temp <- glosowania_tmp %>% filter(id_glosowania <= i)
+    
+    if(nrow(corr_osoba_temp) > 0) {
+      corr_osoba_temp <- corr_osoba_temp %>%
+        count(osoba, glos) %>%
+        pairwise_cor(osoba, glos, n, use = "complete.obs") %>%
+        filter(item1 < item2) %>%
+        mutate(id_glosowania = i)
+      
+      corr_total <- bind_rows(corr_total, corr_osoba_temp)
+    }
+    
+  }
+  
+  return(corr_total)
+}
+```
+
+
+Ostatni element to sprawdzenie czy dwie osoby się do siebie zbliżają w głosowaniach czy oddalają. To może być dobre narzędzie do sprawdzenia czy dany poseł z czasem głosuje podobnie do na przykład lidera klubu, który chciałby go przejąć. Wybrałem dwie barwne postacie, które powinny różnić się w swoich głosach - Sławomira Nitrasa oraz Marka Suskiego.
+
+Algorytm polega na tym, że dla każdego kolejnego głosowania bierzemy historię oddanych głosów przez te dwie osoby i na tej historii liczymy współczynnik korelacji. Dla następnego głosowania robimy to samo. I tak idziemy przez wszystkie głosowania otrzymując coś tego typu:
+
+```{r sejm8_20, fig.height=6, fig.width=12}
+para <- sort(c("Suski Marek", "Nitras Sławomir"))
+corr_total <-  make_two_correlation(para)
+
+p <- corr_total %>%
+  left_join(lista_glosowan %>%
+              select(id_glosowania, data_posiedzenia),
+            by = "id_glosowania") %>%
+  group_by(data_posiedzenia) %>%
+  summarise(m_correlation = mean(correlation, na.rm = TRUE)) %>%
+  ungroup() %>%
+  ggplot() +
+  geom_point(aes(data_posiedzenia, m_correlation)) +
+  # scale_y_continuous(limits = c(-1, 1)) +
+  labs(title = paste0("Zmiana podobieństwa pomiędzy posłami:\n", para[1], " a ", para[2]),
+       subtitle = "Podobieństwo jako współczynnik korelacji oddanych głosów", 
+       x = "Data posiedzenia", y = "Korelacja")
+
+da_plot(p)
+```
+
+Widzimy, że w pierwszych głosowaniach panowie Suski i Nitras głosowali dość podobnie (współczynnik korelacji bliski jedynki). Później (na początku 2016 roku) poróżnili się i z czasem zaczęli się do siebie zbliżać. Na przełomie 2017 i 2018 znowu coś ich poróżniło.
+
+Dla większości posłów (szczególnie z tego samego klubu) wykresy tego typu będą stale bliskie jedynki. Możecie samodzielnie porównać sobie dwie osoby - odpowiednie kody źródłowe (oraz dane w plikach RDS) znajdziecie na [moim GitHubie](https://github.com/prokulski/sejm_viii_kadencji).
+
+
+Podobieństwo można mierzyć też na inne sposoby. Na przykład jako odległość kosinusową wektorów zbudowanych z kolejnych głosów przy przyjęciu że np. głos za to wartość 1, wstrzymujący się lub nieobecność to 0 a przeciw to -1. Daje następujące wyniki:
+
+```{r sejm8_21, fig.height=6, fig.width=12}
+glosowania_tmp <- glosowania %>%
+  filter(osoba %in% para) %>%
+  mutate(glos = case_when(glos == "Przeciw" ~ -1, glos == "Za" ~ 1, TRUE ~ 0))
+
+cos.sim <- function(A, B) 
+{
+  return( sum(A*B)/sqrt(sum(A^2)*sum(B^2)) )
+}  
+
+nr_glosowan <- sort(unique(glosowania$id_glosowania))
+
+sim_total <- tibble()
+
+
+for(i in nr_glosowan) {
+  
+  sim_temp <- glosowania_tmp %>% 
+    filter(id_glosowania <= i) %>%
+    select(-klub) %>%
+    spread(key = osoba, value = glos)
+  
+  if(nrow(sim_temp) > 0) {
+    sim_total <- bind_rows(sim_total, 
+                           tibble(id_glosowania = i,
+                                  sim = cos.sim(sim_temp[, 1], sim_temp[, 2])))
+  }
+  
+}
+
+
+p <- sim_total %>%
+  left_join(lista_glosowan %>%
+              select(id_glosowania, data_posiedzenia),
+            by = "id_glosowania") %>%
+  group_by(data_posiedzenia) %>%
+  summarise(m_correlation = mean(sim, na.rm = TRUE)) %>%
+  ungroup() %>%
+  ggplot() +
+  geom_point(aes(data_posiedzenia, m_correlation)) +
+  # scale_y_continuous(limits = c(-1, 1)) +
+  labs(title = paste0("Zmiana podobieństwa pomiędzy posłami:\n", para[1], " a ", para[2]),
+       subtitle = "Podobieństwo jako odległość kosinusowa", 
+       x = "Data posiedzenia", y = "Podobieństwo")
+
+da_plot(p)
+```
+
+Zmiany widoczne są w podobnych miejscach, różnica jest w znaczeniu wartości z osi Y.
+
+
+Przygotowanie tego wpisu kosztowało mnie jakiś tydzień pracy, z czego najdłużej trwało zbieranie danych (i doglądanie czy skrypt działa czy z jakiegoś powodu się zatrzymał). Sama analiza jest już prosta, o ile wie się co chce się zrobić. I ma się do tego opanowany warsztat.
+
+
+Miło będzie jeśli docenisz trud autora **[stawiając dużą kawę](https://www.paypal.me/prokulski/10pln)**. Wpadnij też na **[Dane i Analizy na Facebooku](https://www.facebook.com/DaneAnalizy/)** i daj lajka, tam więcej takich smaczków (szczególnie dla praktyków) i zdecydowanie częściej. Jest też **[newsletter](https://tinyletter.com/LukaszProkulski)** w którym co jakiś czas duża ilość tekstów wartych uwagi - zapraszam do subskrypcji!
+

@@ -1,0 +1,627 @@
+---
+title: "TITLE"
+author: "Łukasz Prokulski"
+date: "`r Sys.Date()`"
+output: 
+  html_document: 
+    fig_width: 10
+    fig_height: 8
+    fig_align: "center"
+    self_contained: no
+---
+
+
+
+**[Patronite](https://patronite.pl/)** zgodnie z informacją na [Wikipedii](https://pl.wikipedia.org/wiki/Patronite) to założony w 2015 roku serwis wspomagający pozyskiwanie finansowania przez osoby twórcze. Podstawową formą działalności portalu jest pomoc w zdobywaniu comiesięcznego wsparcia od osób indywidualnych i instytucji.
+
+
+```{r document_setup, echo=FALSE, message=FALSE, error=FALSE, warning=FALSE}
+library(tidyverse)
+library(knitr)
+library(kableExtra)
+
+# chunks options
+opts_chunk$set(message = FALSE, error = FALSE, warning = FALSE)
+options(knitr.table.format = "html") 
+
+source("/home/lemur/RProjects/!Rmarkdown_templates/da_plot.R")
+```
+```{r echo=FALSE, message=FALSE, error=FALSE, warning=FALSE}
+library(reticulate)
+```
+
+
+```{python}
+import pandas as pd
+import numpy as np
+
+from collections import Counter
+
+import matplotlib.pyplot as plt
+import matplotlib as mpl
+
+import seaborn as sns
+
+import datetime
+
+
+mpl.style.use(['ggplot'])
+
+
+# wczytujemy dane
+df = pd.read_pickle("data/new_all.pkl")
+
+
+# średnia dotacja per profil
+df["mean_donation"] = df.dotations_per_month / df.patrons
+# Inf -> NaN żeby nie sypały się wykresy
+df.loc[df['patrons'] == 0, "mean_donation"] = np.NaN
+
+
+# rzeczy związane z datą
+# ile dni ma profil?
+def how_long(y, m, d):
+    return (datetime.datetime.now() - datetime.datetime(y, m, d)).days
+
+
+df['profile_age_days'] = df.apply(lambda row: how_long(row['registration_year'], row['registration_month'], row['registration_day']), axis = 1)
+
+# zbudowanie jednej kolumny z datą
+df['registration_date'] = df.apply(lambda row: pd.to_datetime(datetime.date(row['registration_year'], row['registration_month'], row['registration_day'])), axis=1)
+
+
+df.reset_index(drop=True, inplace=True)
+```
+```{r echo=FALSE}
+# kopiujemy dataframe do Ra
+df <- py$df
+plot_subtitle <- "Na podstawie danych zebranych ze stron Patronite.pl w dniach 24-30.08.2020"
+```
+
+
+```{python eval=FALSE}
+# ile profili zarejestrowało się w kolejnych latach
+df_per_year = df.value_counts("registration_year").reset_index()
+df_per_year.columns = ['registration_year', 'count']
+
+sns.barplot(data=df_per_year, x="registration_year", y="count")
+```
+```{r patronite_01, echo=FALSE, fig.height=5}
+p <- df %>%
+  count(registration_year) %>%
+  mutate(registration_year = as_factor(registration_year)) %>%
+  ggplot() + 
+  geom_col(aes(registration_year, n), fill="#ee2c25") +
+  geom_text(aes(registration_year, n, label=n, vjust=if_else(n<300, -1.01, 1.5))) +
+  labs(title = "Patronite.pl: Liczba założonych profili w poszczególnych latach",
+       subtitle = plot_subtitle,
+       x = "", y = "Liczba profili")
+
+da_plot(p)
+```
+
+
+```{python eval=FALSE}
+# ile profili powstało w 2020 roku?
+df_2020_month = df[df['registration_year'] == 2020].value_counts("registration_month").reset_index()
+df_2020_month.columns = ['registration_month', 'count']
+
+sns.barplot(data=df_2020_month, x="registration_month", y="count")
+```
+
+```{r patronite_02, echo=FALSE, fig.height=5}
+tdf <- df %>%
+  count(registration_year, registration_month)
+
+
+p <- tdf %>%
+  filter(registration_year == 2020) %>%
+  mutate(registration_month = as_factor(registration_month)) %>%
+  ggplot() + 
+  geom_col(aes(registration_month, n), color="black", fill="#ee2c25") +
+  geom_text(aes(registration_month, n, label=n, vjust=if_else(n<180, -1.01, 1.5))) +
+  labs(title = "Patronite.pl: Liczba założonych profili w kolejnych miesiącach 2020 roku",
+       subtitle = plot_subtitle,
+       x = "Miesiąc 2020 roku", y = "Liczba profili")
+
+da_plot(p)
+```
+
+czy pandemia i lockdown sprawiły, że jest więcej patronów?
+
+
+```{python eval=FALSE}
+df_by_month = df.value_counts(['registration_year', "registration_month"]).reset_index()
+df_by_month.columns = ['registration_year', 'registration_month', 'count']
+
+sns.barplot(data=df_by_month, x="registration_month", y="count", hue='registration_year')
+```
+```{r patronite_03, echo=FALSE, fig.height=5}
+p <- tdf %>%
+  mutate(registration_month = as_factor(registration_month),
+         registration_year = as_factor(registration_year)) %>%
+  ggplot() + 
+  geom_col(aes(registration_month, n, fill=registration_year), color="black", position = "dodge2") +
+  labs(title = "Patronite.pl: Liczba założonych profili w kolejnych miesiącach",
+       subtitle = plot_subtitle,
+       x = "Miesiąc", y = "Liczba profili", fill="Rok założenia\nprofilu")
+
+da_plot(p, legend_bottom = TRUE)
+```
+
+```{python eval=FALSE}
+# kto ma najwięcej patronów
+df.sort_values("patrons", ascending=False).head(20)
+```
+```{r patronite_04, echo=FALSE}
+p <- df %>%
+  select(name, patrons) %>%
+  top_n(20, patrons) %>%
+  arrange(patrons) %>%
+  mutate(name = fct_inorder(name)) %>%
+  ggplot() + 
+  geom_col(aes(name, patrons), fill="#ee2c25") +
+  geom_text(aes(name, patrons,
+                label=scales::label_number_auto()(patrons),
+                hjust=if_else(patrons < 10000, -0.2, 1.1)), size = 3) +
+  coord_flip() +
+  scale_y_continuous(labels = scales::label_number_auto()) +
+  labs(title = "Patronite.pl: Profile z największą liczbą patronów",
+       subtitle = plot_subtitle,
+       x = "", y = "Liczba patronów")
+
+da_plot(p)
+```
+
+```{python}
+df['patrons'].describe()
+```
+
+
+```{python eval=FALSE}
+sns.distplot(df[df['patrons'].between(1, 20)]['patrons'], bins=20)
+```
+```{r patronite_05a, echo=FALSE, fig.height=5}
+p <- bind_rows(df %>% filter(patrons == 0) %>%
+            mutate(patrons = "brak") %>% count(patrons),
+          tribble(~patrons, ~n, "1", 0),
+          df %>% filter(between(patrons, 1, 20)) %>% 
+            count(patrons) %>% mutate(patrons = as.character(patrons)),
+          df %>% filter(patrons > 20) %>% mutate(patrons = "21+") %>% 
+            count(patrons)) %>% mutate(patrons = as_factor(patrons)) %>%
+  ggplot() + 
+  geom_col(aes(patrons, n), 
+           color="black", fill="#ee2c25") +
+  geom_text(aes(patrons, n, label=n,
+                vjust=if_else(n < 200, -0.5, 1.5)), size = 3) +
+  labs(title = "Patronite.pl: Liczba profili w zależności od liczby patronów",
+       subtitle = plot_subtitle,
+       x = "Liczba patronów", y = "Liczba profili")
+
+da_plot(p)
+```
+
+```{r patronite_05b, echo=FALSE, fig.height=5}
+p <- bind_rows(df %>% filter(patrons == 0) %>% mutate(patrons = "brak") %>% count(patrons),
+               df %>% filter(between(patrons, 1, 5)) %>% mutate(patrons = "< 5") %>% count(patrons),
+               df %>% filter(between(patrons, 5, 10)) %>% mutate(patrons = "5 - 10") %>% count(patrons),
+               df %>% filter(between(patrons, 10, 20)) %>% mutate(patrons = "10 - 20") %>% count(patrons),
+               df %>% filter(between(patrons, 20, 50)) %>% mutate(patrons = "20 - 50") %>% count(patrons),
+               df %>% filter(between(patrons, 50, 100)) %>% mutate(patrons = "50 - 100") %>% count(patrons),
+               df %>% filter(patrons > 100) %>% mutate(patrons = "> 100") %>% count(patrons)
+               ) %>%
+  mutate(patrons = as_factor(patrons)) %>%
+  ggplot() + 
+  geom_col(aes(patrons, n), fill="#ee2c25") +
+  geom_text(aes(patrons, n, label=n,
+                vjust=if_else(n < 200, -0.5, 1.5)), size = 3) +
+  labs(title = "Patronite.pl: Liczba profili w zależności od liczby patronów",
+       subtitle = plot_subtitle,
+       x = "Liczba patronów", y = "Liczba profili")
+
+da_plot(p)
+```
+
+```{python}
+# rozkład dotacji miesięcznych
+df[df['dotations_per_month'] != 0]['dotations_per_month'].describe()
+```
+
+```{python eval=FALSE}
+sns.distplot(df[df["dotations_per_month"].between(1, 150)]["dotations_per_month"], bins=150)
+```
+```{r patronite_06, echo=FALSE, fig.height=5}
+p <- df %>% 
+  filter(between(dotations_per_month, 1, 150)) %>%
+  ggplot() + 
+  geom_histogram(aes(dotations_per_month), bins = 150, 
+                 color="black", fill="#ee2c25") + 
+    scale_x_continuous(breaks = seq(0, 150, 10),
+                       labels = scales::label_dollar(prefix = "",
+                                                     suffix = " zł",
+                                                     big.mark = ".", 
+                                                     decimal.mark = ",")) +
+  labs(title = "Patronite.pl: Liczba profili w zależności od kwoty miesięcznych dotacji",
+       subtitle = paste0(plot_subtitle, "\nTylko profile z miesięczną dotacją poniżej 150 zł"),
+       x = "Kwota miesięcznych dotacji", y = "Liczba profili")
+
+da_plot(p)
+```
+
+
+```{python eval=FALSE}
+# kto dostaje najwięcej miesięcznie?
+df.sort_values("dotations_per_month", ascending=False).head(10)
+```
+```{r patronite_07, echo=FALSE}
+p <- df %>%
+  select(name, dotations_per_month) %>%
+  top_n(20, dotations_per_month) %>%
+  arrange(dotations_per_month) %>%
+  mutate(name = fct_inorder(name)) %>%
+  ggplot() + 
+  geom_col(aes(name, dotations_per_month), fill="#ee2c25") +
+  geom_text(aes(name, dotations_per_month,
+                label=scales::label_number_auto()(dotations_per_month),
+                hjust=if_else(dotations_per_month < 100000, -0.1, 1.1)), size = 3) +
+  coord_flip() +
+  scale_y_continuous(labels = scales::label_dollar(prefix = "", suffix = " zł", big.mark = ".", decimal.mark = ",")) +
+  labs(title = "Patronite.pl: Profile z największą kwotą miesięcznych darowizn",
+       subtitle = plot_subtitle,
+       x = "", y = "Kwota miesięcznych darowizn")
+
+da_plot(p)
+```
+
+```{python eval=FALSE}
+# kto łącznie zebrał najwięcej
+df.sort_values("total_dotations", ascending=False).head(10)
+```
+```{r patronite_08, echo=FALSE}
+p <- df %>%
+  select(name, total_dotations) %>%
+  top_n(20, total_dotations) %>%
+  arrange(total_dotations) %>%
+  mutate(name = fct_inorder(name)) %>%
+  ggplot() + 
+  geom_col(aes(name, total_dotations), fill="#ee2c25") +
+  geom_text(aes(name, total_dotations,
+                label=scales::label_dollar(prefix = "", suffix = "", big.mark = ".", decimal.mark = ",")(total_dotations),
+                hjust=if_else(total_dotations < 2000000, -0.1, 1.1)), size = 3) +
+  coord_flip() +
+  scale_y_continuous(labels = scales::label_dollar(prefix = "", suffix = " zł", big.mark = ".", decimal.mark = ",")) +
+  labs(title = "Patronite.pl: Profile z największą zebraną kwotą darowizn",
+       subtitle = plot_subtitle,
+       x = "", y = "Kwota łączna darowizn")
+
+da_plot(p)
+```
+
+```{python eval=FALSE}
+# średnia kwota dotacji
+sns.distplot(df.mean_donation)
+```
+```{r patronite_09, echo=FALSE, fig.height=5}
+p <- df %>% 
+  ggplot() + 
+  geom_histogram(aes(mean_donation), binwidth=5,
+                 color="black", fill="#ee2c25") + 
+  
+    scale_x_continuous(breaks = seq(0, 500, 20),
+                       labels = scales::label_dollar(prefix = "",
+                                                     suffix = " zł",
+                                                     big.mark = ".", 
+                                                     decimal.mark = ",")) +
+  labs(title = "Patronite.pl: Liczba profili w zależności od średniej dotacji",
+       subtitle = plot_subtitle,
+       x = "Średnia kwota dotacji", y = "Liczba profili")
+
+da_plot(p)
+```
+
+```{python}
+df[(df['mean_donation'] > 0) & ~pd.isna(df['mean_donation'])]['mean_donation'].describe()
+```
+
+```{python eval=FALSE}
+sns.distplot(df[df["mean_donation"] < 100]["mean_donation"], bins=50)
+```
+```{r patronite_10, echo=FALSE, fig.height=5}
+p <- df %>% 
+  filter(between(mean_donation, 0, 100)) %>%
+  ggplot() + 
+  geom_histogram(aes(mean_donation), binwidth=1,
+                 color="black", fill="#ee2c25") +
+    scale_x_continuous(breaks = seq(0, 100, 10),
+                       labels = scales::label_dollar(prefix = "",
+                                                     suffix = " zł",
+                                                     big.mark = ".", 
+                                                     decimal.mark = ",")) +
+  labs(title = "Patronite.pl: Liczba profili w zależności od średniej dotacji",
+       subtitle = paste0(plot_subtitle, "\nTylko profile ze średnią kwotą dotacji mniejszą niż 100 zł/miesiąc"),
+       x = "Średnia kwota dotacji", y = "Liczba profili")
+
+da_plot(p)
+```
+
+Czy liczba patronów ma wpływ na miesięczne przychody?
+
+```{python eval=FALSE}
+sns.scatterplot(data=df[df.patrons < 500], x='patrons', y='dotations_per_month')
+```
+```{r patronite_11, echo=FALSE}
+p <- df %>%
+  filter(patrons < 500) %>%
+  ggplot() +
+  geom_point(aes(patrons, dotations_per_month), color="#ee2c25") +
+      scale_y_continuous(breaks = seq(0, 20000, 2000),
+                       labels = scales::label_dollar(prefix = "",
+                                                     suffix = " zł",
+                                                     big.mark = ".", 
+                                                     decimal.mark = ",")) +
+    labs(title = "Patronite.pl: zależność kwoty miesięcznych darowizn od liczby patronów",
+       subtitle = paste0(plot_subtitle, "\nTylko profile mniej niż 500 patronami"),
+       x = "Liczba patronów", y = "Miesięczna kwota darowizn")
+
+da_plot(p)
+```
+
+Czy wiek profilu determinuje miesięczny przychód?
+
+```{python eval=FALSE}
+sns.scatterplot(data=df[df["dotations_per_month"].between(1, 1000)], x='profile_age_days', y='dotations_per_month')
+```
+```{r patronite_12, echo=FALSE}
+p <- df %>%
+  filter(between(dotations_per_month, 1, 1000)) %>%
+  ggplot() +
+  geom_point(aes(profile_age_days, dotations_per_month), color="#ee2c25") +
+      scale_y_continuous(breaks = seq(0, 1000, 200),
+                       labels = scales::label_dollar(prefix = "",
+                                                     suffix = " zł",
+                                                     big.mark = ".", 
+                                                     decimal.mark = ",")) +
+    labs(title = "Patronite.pl: zależność miesięcznej kwoty drowizn od wieku profilu",
+       subtitle = paste0(plot_subtitle, "\nTylko profile ze miesięczną darowizną mniejszą niż 1000 zł"),
+       x = "Wiek profilu w dniach", y = "Miesięczna kwota darowizn")
+
+da_plot(p)
+```
+
+
+czy czas życia profilu ma wpływ na łączne przychody?
+
+```{python eval=FALSE}
+sns.scatterplot(data=df[df["total_dotations"] <= 100000], x='profile_age_days', y='total_dotations')
+```
+```{r patronite_13, echo=FALSE}
+p <- df %>%
+  filter(between(total_dotations, 1, 100000)) %>%
+  ggplot() +
+  geom_point(aes(profile_age_days, total_dotations), color="#ee2c25") +
+      scale_y_continuous(breaks = seq(0, 100000, 20000),
+                       labels = scales::label_dollar(prefix = "",
+                                                     suffix = " zł",
+                                                     big.mark = ".", 
+                                                     decimal.mark = ",")) +
+    labs(title = "Patronite.pl: zależność zebranej łącznie kwoty od wieku profilu",
+       subtitle = paste0(plot_subtitle, "\nTylko profile z zebraną łącznie kwotą mniejszą niż 100 tys. zł"),
+       x = "Wiek profilu w dniach", y = "Łączna kwota dotacji")
+
+da_plot(p)
+```
+
+
+czy wiek profilu przekłada się liczbę patronów?
+
+```{python eval=FALSE}
+sns.scatterplot(data=df[df['patrons'] < 150], x='profile_age_days', y='patrons')
+```
+```{r patronite_14, echo=FALSE}
+p <- df %>%
+  filter(between(patrons, 1, 150)) %>%
+  ggplot() +
+  geom_point(aes(profile_age_days, patrons), color="#ee2c25") +
+    labs(title = "Patronite.pl: zależność liczby patronów od wieku profilu",
+       subtitle = paste0(plot_subtitle, "\nTylko profile mniej niż 150 patronami"),
+       x = "Wiek profilu w dniach", y = "Liczba patronów")
+
+da_plot(p)
+```
+
+czy wiek profilu przekłada się średnią dotację?
+
+```{python eval=FALSE}
+sns.scatterplot(data=df[df['mean_donation'] < 150], x='profile_age_days', y='mean_donation')
+```
+```{r patronite_15, echo=FALSE}
+p <- df %>%
+  filter(between(mean_donation, 1, 150)) %>%
+  ggplot() +
+  geom_point(aes(profile_age_days, mean_donation), color="#ee2c25") +
+      scale_y_continuous(breaks = seq(0, 150, 25),
+                       labels = scales::label_dollar(prefix = "",
+                                                     suffix = " zł",
+                                                     big.mark = ".", 
+                                                     decimal.mark = ",")) +
+    labs(title = "Patronite.pl: zależność średniej kwoty dodatacji od wieku profilu",
+       subtitle = paste0(plot_subtitle, "\nTylko profile mniej niż 150 patronami"),
+       x = "Wiek profilu w dniach", y = "Średnia kwota dotacji")
+
+da_plot(p)
+```
+
+
+
+```{python}
+# najpopularniejsze tagi
+df['tags_list'] = df['tags'].apply(lambda t: t.split("|"))
+
+tag_list = [i for t in df['tags_list'] for i in t ]
+
+tag_list_coll = dict(Counter(tag_list))
+
+popular_tags = pd.DataFrame.from_dict(dict(sorted(tag_list_coll.items(), key=lambda x: x[1], reverse=True)), orient='index').reset_index()
+popular_tags.columns = ['tag', 'count']
+
+# Pandas >= 0.25
+df_tags = df.explode('tags_list')
+df_tags_agg = df_tags.groupby('tags_list').aggregate({"patrons": "mean",
+                                       "dotations_per_month": "mean",
+                                       "total_dotations": "mean",
+                                       "mean_donation": "mean"}).reset_index()
+
+```
+```{r echo=FALSE}
+popular_tags <- py$popular_tags
+df_tags_agg <- py$df_tags_agg
+```
+
+Jakie są najpopularniejsze tagi?
+
+```{python eval=FALSE}
+sns.barplot(data=popular_tags.nlargest(20, 'count'), x="count", y="tag")
+```
+```{r patronite_16, echo=FALSE}
+p <- popular_tags %>%
+  top_n(20, count) %>%
+  arrange(count) %>%
+  mutate(tag = fct_inorder(tag)) %>%
+  ggplot() +
+  geom_col(aes(tag, count), fill="#ee2c25") +
+  geom_text(aes(tag, count,
+                label=scales::label_number_auto()(count),
+                hjust=if_else(count < 750, -0.1, 1.1)), size = 3) +
+  coord_flip() +
+  scale_y_continuous(labels = scales::label_number_auto()) +
+  labs(title = "Patronite.pl: Najpopularniejsze tagi określające profile",
+       subtitle = plot_subtitle,
+       x = "", y = "Liczba profili")
+
+
+da_plot(p)
+```
+
+
+
+```{python eval=FALSE}
+df_tags_agg.nlargest(10, 'patrons')[['tags_list', 'patrons']]
+```
+```{r patronite_17, echo=FALSE}
+p <- df_tags_agg %>%
+  top_n(20, patrons) %>%
+  arrange(patrons) %>%
+  mutate(tag = fct_inorder(tags_list)) %>%
+  ggplot() +
+  geom_col(aes(tag, patrons), fill="#ee2c25") +
+  geom_text(aes(tag, patrons,
+              label=scales::label_number(accuracy=0.1)(patrons),
+                hjust=if_else(patrons < 200, -0.1, 1.1)), size = 3) +
+  coord_flip() +
+  scale_y_continuous(labels = scales::label_number()) +
+  labs(title = "Patronite.pl: Średnia liczba patronów w zależności od tagu",
+       subtitle = plot_subtitle,
+       x = "", y = "Liczba patronów")
+
+
+da_plot(p)
+```
+
+
+```{python eval=FALSE}
+df_tags_agg.nlargest(10, 'dotations_per_month')[['tags_list', 'dotations_per_month']]
+```
+```{r patronite_18, echo=FALSE}
+p <- df_tags_agg %>%
+  top_n(20, dotations_per_month) %>%
+  arrange(dotations_per_month) %>%
+  mutate(tag = fct_inorder(tags_list)) %>%
+  ggplot() +
+  geom_col(aes(tag, dotations_per_month), fill="#ee2c25") +
+  geom_text(aes(tag, dotations_per_month,
+                label=scales::label_dollar(prefix = "", suffix = "", big.mark = ".", decimal.mark = ",")(dotations_per_month),
+                hjust=if_else(dotations_per_month < 4000, -0.1, 1.1)), size = 3) +
+  coord_flip() +
+  scale_y_continuous(labels = scales::label_dollar(prefix = "", suffix = " zł", big.mark = ".", decimal.mark = ",")) +
+  labs(title = "Patronite.pl: Średni dochód miesięczny profilu w zależności od tagu",
+       subtitle = plot_subtitle,
+       x = "", y = "Średni dochód miesięczny")
+
+
+da_plot(p)
+```
+
+
+
+```{python eval=FALSE}
+df_tags_agg.nlargest(10, 'total_dotations')[['tags_list', 'total_dotations']]
+```
+```{r patronite_19, echo=FALSE}
+p <- df_tags_agg %>%
+  top_n(20, total_dotations) %>%
+  arrange(total_dotations) %>%
+  mutate(tag = fct_inorder(tags_list)) %>%
+  ggplot() +
+  geom_col(aes(tag, total_dotations), fill="#ee2c25") +
+  geom_text(aes(tag, total_dotations,
+                label=scales::label_dollar(prefix = "", suffix = "", big.mark = ".", decimal.mark = ",")(total_dotations),
+                hjust=if_else(total_dotations < 100000, -0.1, 1.1)), size = 3) +
+  coord_flip() +
+  scale_y_continuous(labels = scales::label_dollar(prefix = "", suffix = " zł", big.mark = ".", decimal.mark = ",")) +
+  labs(title = "Patronite.pl: Łączna kwota darowizn w zależności od tagu (średnio)",
+       subtitle = plot_subtitle,
+       x = "", y = "Średnia łączna kwota darowizn")
+
+
+da_plot(p)
+```
+
+
+
+```{python eval=FALSE}
+df_tags_agg.nlargest(10, 'mean_donation')[['tags_list', 'mean_donation']]
+```
+```{r patronite_20, echo=FALSE}
+p <- df_tags_agg %>%
+  top_n(20, mean_donation) %>%
+  arrange(mean_donation) %>%
+  mutate(tag = fct_inorder(tags_list)) %>%
+  ggplot() +
+  geom_col(aes(tag, mean_donation), fill="#ee2c25") +
+  geom_text(aes(tag, mean_donation,
+                label=scales::label_dollar(prefix = "", suffix = "", big.mark = ".", decimal.mark = ",")(mean_donation),
+                hjust=if_else(mean_donation < 40, -0.1, 1.1)), size = 3) +
+  coord_flip() +
+  scale_y_continuous(labels = scales::label_dollar(prefix = "", suffix = " zł", big.mark = ".", decimal.mark = ",")) +
+  labs(title = "Patronite.pl: Średnia kwota dotacji w zależności od tagu",
+       subtitle = plot_subtitle,
+       x = "", y = "Średnia kwota dotacji")
+
+
+da_plot(p)
+```
+
+
+
+# ile zarabia Partonite?
+
+* jak zarabia partonite? 6.5% od wpłat https://patronite.freshdesk.com/support/solutions/articles/43000094369-jak-zarabia-patronite-i-operatorzy-p%C5%82atno%C5%9Bci-
+
+
+```{python}
+partonite_zarobki = df[['registration_year', 'total_dotations']].groupby('registration_year').aggregate("sum").reset_index()
+partonite_zarobki['prowizja'] = round(6.5/100 * partonite_zarobki['total_dotations'], 2)
+```
+
+```{python}
+# łącznie
+round(np.sum(partonite_zarobki['prowizja']))
+```
+
+```{python}
+# miesięcznie
+round(np.sum(partonite_zarobki['prowizja'])/(4*12))
+```
+
+
+Czy ta miesięczna kwota to dużo? Zgodnie z informacją na stronie [Nasz zespół](https://patronite.pl/kim_jestesmy) w Patronite pracuje 11 osób. Nie wiem jakie są zasady współpracy, nie wiem jakie są wszystkie koszty (hosting chociażby, prąd, lokum do pracy, komputery). Nie wiem też czy prowizja to jedyna forma dochodu. Interpretację pozostawiam Wam.

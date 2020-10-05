@@ -1,0 +1,314 @@
+---
+title: "Testowanie rozkładu, hipotez i regresja logistyczna"
+author: "Łukasz Prokulski"
+date: "`r Sys.Date()`"
+output: 
+  html_document: 
+    fig_height: 6
+    fig_width: 8
+    fig_align: "center"
+    self_contained: no
+---
+
+```{r document_setup, echo=FALSE, message=FALSE, error=FALSE, warning=FALSE}
+library(tidyverse)
+library(knitr)
+library(kableExtra)
+
+# chunks options
+opts_chunk$set(message = FALSE, error = FALSE, warning = FALSE)
+options(knitr.table.format = "html") 
+
+source("/home/lemur/RProjects/!Rmarkdown_templates/da_plot.R")
+```
+
+Dzisiaj trochę nadrabiana statystyki za pomogą R. Zobaczymy jak przetestować czy rozkład jest normalny, jak przetestować hipotezy i jak zbudować prosty model.
+
+
+```{r}
+library(tidyverse)
+library(broom)
+library(knitr)
+library(kableExtra)
+```
+
+Za dane przykładowe posłużą nam dane o wzroście i wadze w podziale na płeć. Wczytujemy dane - użyjemy [zestawu danych z Kaggle](https://www.kaggle.com/mustafaali96/weight-height) (ściągnąłem je wcześniej na dysk):
+
+```{r}
+data <- read_csv("weight-height.csv")
+
+# szybki rzut oka w dane
+glimpse(data)
+```
+
+Dziwne te liczby: wzrost w okolicach 70? Waga blisko 200? Dane są amerykańskie, więc wzrost mamy w calach, a wagę w funtach. Nie musimy, ale możemy przeliczyć to na jednostki metryczne - będzie nam łatwiej interpretować wyniki.
+
+```{r}
+data <- data %>%
+  mutate(Height = Height * 2.54,       # 1 cal = 2.54 cm
+         Weight = Weight * 0.45359237) # 1 funt to 0.45 kg
+
+# znowu patrzymy w dane
+glimpse(data)
+```
+
+Teraz wygląda to *normlanie*. Zobaczmy kilka rozkładów, od razu w podziale na płeć.
+
+Zaleźność wagi od wzrostu:
+
+```{r wzrost_waga_01}
+plot <- ggplot(data) + 
+  geom_point(aes(Height, Weight, color = Gender), 
+             size = 0.1, alpha = 0.25) + 
+  scale_color_manual(values = c("Male" = "blue", "Female" = "red"))
+
+da_plot(plot)
+```
+
+Rozkład wagi:
+
+```{r wzrost_waga_02, fig.height=4}
+plot <- ggplot(data) +
+  geom_density(aes(Weight, fill = Gender), alpha = 0.5) +
+  scale_fill_manual(values = c("Male" = "blue", "Female" = "red"))
+
+da_plot(plot)
+```
+
+Rozkład wzrostu:
+
+```{r wzrost_waga_03, fig.height=4}
+plot <- ggplot(data) +
+  geom_density(aes(Height, fill = Gender), alpha = 0.5) +
+  scale_fill_manual(values = c("Male" = "blue", "Female" = "red"))
+
+da_plot(plot)
+```
+
+
+Zobaczmy teraz jakie właściwości mają te rozkłady. Jaka jest średnia, jakie są kwartyle, jakie jest odchylenie standardowe
+
+
+```{r}
+# obliczmy statystyki opisowe dla wzrostu
+stats_Height <- data %>%
+  select(Gender, Height) %>%
+  # budujemy zagnieżdzone DF per płeć
+  nest(-Gender) %>%
+  # liczymy statystyki opisowe dla obu parametrów w zagnieżdzonych tabelkach
+  mutate(stats = map(data, ~map_dfc(lst(min, mean, median, max, sd),
+                                    function(.fun) .fun(.x$Height)))) %>%
+  # nie potrzebujemy danych
+  select(-data) %>%
+  # rozgnieżdzamy tabele
+  unnest() %>%
+  mutate(Feature = "Height") %>%
+  gather("Param", "Value", -Feature, -Gender) %>%
+  spread(Gender, Value)
+
+
+# to samo robimy dla wagi
+stats_Weight <- data %>%
+  select(Gender, Weight) %>%
+  nest(-Gender) %>%
+  mutate(stats = map(data, ~map_dfc(lst(min, mean, median, max, sd),
+                                    function(.fun) .fun(.x$Weight)))) %>%
+  select(-data) %>%
+  unnest() %>%
+  mutate(Feature = "Weight") %>%
+  gather("Param", "Value", -Feature, -Gender) %>%
+  spread(Gender, Value)
+
+
+# łączymy obie tabele
+stats <- bind_rows(stats_Weight, stats_Height) %>%
+  # cechy zmieniamy na faktory i ustalamy ich kolejność (do sortowania)
+  mutate(Param = factor(Param,
+                          levels = c("min", "mean", "median", "max", "sd"),
+                          labels = c("Minimum", "Mean", "Median", "Maximum", "Std. dev."))) %>%
+  # sortujemy tabelkę w odpowiedni sposób
+  arrange(Feature, Param)
+
+# tabelka:
+stats %>%
+  # to co jest kolumną liczbową zaokrąglamy do 1 miejsca po przecinku
+  mutate_if(is.numeric, ~ round(.x, 1)) %>%
+  kable(format = "html") %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed", "responsive"))
+```
+
+Ciekawe nie ma wiekich ciekawostek, ale warto zwrócić uwagę na dwie liczby, które za chwilę będziemy porównywać (nie wprost) - średni wzrost kobiet to około 162 cm, a mężczyzn - 175 cm.
+
+
+### Test normalności
+
+Widać to co prawda od razu, ale sprawdźmy czy rozkład wzrostu i wagi jest rozkładem normalnym. Przy zastosowaniu wielu metod statystycznych ważne jest, aby zbiór był zbiorem podlegającym rozkładowi normalnemu. Szczegóły w podręcznikach ;)
+
+Hipotezy zerowa oraz alternatywna są następującej postaci:
+
+* H<sub>0</sub>: Rozkład badanej cechy jest rozkładem normalnym.
+* H<sub>1</sub>: Rozkład badanej cechy nie jest rozkładem normalnym.
+
+
+#### Test Shapiro-Wilka
+
+To jeden z najbardziej popularnych testów i najczęściej wykorzystywanych. Funkcja `shapiro.test()` z pakietu `stats` (wbudowany w R, nie trzeba go instalować) pozwala na przetestowania od 3 do 5000 próbek. Na szczęście mamy po 5000 pomiarów dla każdej z płci.
+
+```{r}
+data %>%
+  group_by(Gender) %>%
+  summarise(shapiro_Height = shapiro.test(Height)$p.value,
+            shapiro_Weight = shapiro.test(Weight)$p.value) %>%
+  ungroup() %>%
+  mutate_if(is.numeric, ~ round(.x, 4)) %>%
+  kable(format = "html") %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed", "responsive"))
+```
+
+Za chwilę omówimy wyniki, ale prosta znajomość zasad testowania hipotez już pozwala rozpoznać odpowiedź.
+
+#### Test Kołmogorowa-Smirnowa
+
+Drugi test jest również często spotykany, nad testem Shapiro-Wilka ma tą przewagę, że pozwala porównać dwa rozkłady (czyli sprawdzić czy dana próbka ma rozkład jaki znamy). Tutaj jednak wcześniej potrzebne jest skalowanie zmiennych, bez którego wartość zwracana w $p.value funkcji ks.test() jest równa zero (mimo że wynik wyświetlany na ekranie jest taki sam).
+
+```{r}
+data %>%
+  group_by(Gender) %>%
+  summarise(ks_Height = ks.test(scale(Height), "pnorm")$p.value,
+            ks_Weight = ks.test(scale(Weight), "pnorm")$p.value) %>%
+  ungroup() %>%
+  mutate_if(is.numeric, ~ round(.x, 4)) %>%
+  kable(format = "html") %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed", "responsive"))
+```
+
+We wszystkich przypadkach (dla każdej płci, obu cech i w obu testach) wartość **p-value jest większa od** naszego (standardowo zakładanego) przedziału ufności **0.05, zatem nie możemy odrzucić hipotezy alternatywnej H1**, czyli - mamy do czynienia z rozkładami normalnymi.
+
+Więcej (z opisem i matematyką za nimi stojącą) o testach na normalność rozkładu znajdziecie na blogu [SmarterPoland.pl](http://smarterpoland.pl/index.php/2013/04/wybrane-testy-normalnoci/).
+
+
+### Czy mężczyźni są wyżsi od kobiet?
+
+To wiemy z doświadczenia, z powyższych wykresów z rozkładem oraz tabelki z podstawowymi liczbami opisującymi statystykę: średnie wzrostu są różne. Ale jak to zbadać w R? Użyjemy testu t-Studenta. Hipotezy tym razem wyglądają następująco:
+
+* H<sub>0</sub>: kobiety i mężczyźni są średnio tego samego wzrostu
+* H<sub>1</sub>: średni wzrost różni się pomiędzy płciami
+
+Do testu użyjemy funkcji `t.test()`:
+
+```{r}
+t.test(data %>% filter(Gender == "Male") %>% pull(Height), # wzrost mężczyzn
+       data %>% filter(Gender == "Female") %>% pull(Height)) # wzrost kobiet
+```
+
+**p-value jest dużo mniejsze od 0.05, zatem na 95% możemy odrzucić H<sub>0</sub>** i przyznać, że średni wzrost różni się między płciami.
+
+Ale czy kobiety są wyższe czy niższe? Ponownie użyjemy tego samego testu z jednym dodatkowym parametrem `alternative`. Tutaj hipotezy mamy następujące:
+
+* H<sub>0</sub>: mężczyźni są wyższi od kobiet
+* H<sub>1</sub>: mężczyźni **nie** są wyższi od kobiet
+
+Zatem porównujemy czy pierwszy zbiór (wzrost mężczyzn) ma średnią **większą** od średniej drugiego zbioru (wzrost kobiet):
+
+```{r}
+t.test(data %>% filter(Gender == "Male") %>% pull(Height), # wzrost mężczyzn
+       data %>% filter(Gender == "Female") %>% pull(Height), # wzrost kobiet
+       alternative = "greater") # pierwsza średnia większa od drugiej średniej
+```
+
+**p-value < 0.05 więc na 95% możemy pozostać przy H<sub>0</sub>** co oznacza, że średnio mężczyźni są wyżsi od kobiet.
+
+
+### Model - regresja logistyczna
+
+Czy na podstawie wzrostu i wagi możemy określić płeć? Spróbujmy zbudować stosowny, prosty, model.
+
+Do wyboru mamy wynik będący jedną z dwóch płci, zatem zastosujemy regresję logistyczną.
+
+W pierwszym kroku jednak podzielmy dane na uczące `train` i testowe `test` na których zbadany dokładność działania modelu.
+
+```{r}
+# losujemu 80% wierszy - ich ID
+ids <- sample(1:nrow(data), 0.80*nrow(data))
+# dane treningowe:
+train <- data[ids, ]
+# pozostałe dane będą testem:
+test <- data[-ids, ]
+```
+
+Teraz zbudujemy prosty model. Odpowiedź musi być *factor*em:
+
+```{r}
+model_glm <- glm(as.factor(Gender) ~ Weight + Height,
+                 data = train,
+                 family = "binomial")
+
+model_glm
+```
+
+Mając model możemy dokonać predykcji na danych testowych:
+
+```{r wzrost_waga_04}
+# predykcja
+test$pred <- predict(model_glm, newdata = test)
+
+# jeśli wynik predykcji jest mniejszy od zera to płeć będzie pierwszym faktorem
+# (a liczą się one zgodnie z alfabetem, bo nie zmieniliśmy tego)
+test$pred_Gender <- if_else(test$pred < 0, "Female", "Male")
+
+
+# zobaczmy rozkład odpowiedzi modelu na dane testowe
+plot <- ggplot(test) +
+  geom_violin(aes(Gender, pred, fill = Gender)) +
+  scale_fill_manual(values = c("Male" = "blue", "Female" = "red"))
+
+da_plot(plot)
+```
+
+Sprwadźmy wynik:
+
+```{r}
+table(test$Gender, test$pred_Gender)
+```
+
+I skuteczność dopasowania:
+
+```{r}
+sum(diag(table(test$Gender, test$pred_Gender))) / sum(table(test$Gender, test$pred_Gender))
+```
+
+W `r round(100*sum(diag(table(test$Gender, test$pred_Gender))) / sum(table(test$Gender, test$pred_Gender)), 1)` procentach model przewidział trafnie wynik.
+
+
+### Model - las losowy
+
+Spróbujmy z innym modelem - na przykład z lasem losowym.
+
+```{r}
+library(randomForest)
+
+# budujemy model oparty na 100 drzewach
+model_rf <- randomForest(as.factor(Gender) ~ Weight + Height,
+                 data = train,
+                 ntree = 100)
+
+# przewidujemy wyniki
+test$pred_Gender_rf <- predict(model_rf, newdata = test)
+```
+
+Wynik:
+
+```{r}
+table(test$Gender, test$pred_Gender_rf)
+```
+
+```{r include=FALSE}
+glm_score <- sum(diag(table(test$Gender, test$pred_Gender))) / sum(table(test$Gender, test$pred_Gender))
+rf_score <- sum(diag(table(test$Gender, test$pred_Gender_rf))) / sum(table(test$Gender, test$pred_Gender))
+```
+
+W tym przypadku poprawdność przewidywań to `r round(100*sum(diag(table(test$Gender, test$pred_Gender_rf))) / sum(table(test$Gender, test$pred_Gender)), 1)` procent, a zatem `r if_else(rf_score > glm_score, "lepiej", "gorzej")` niż regresja logistyczna.
+
+`r if_else(rf_score > glm_score, "Okazuje się więc, że większy kombajn (jakim są lasy losowe) daje lepsze wyniki.", "Nie zawsze więc wielki kombajn (jakim są lasy losowe) jest nam potrzebny.")`
+
+

@@ -1,0 +1,565 @@
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml">
+
+<head>
+
+<meta charset="utf-8" />
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+<meta name="generator" content="pandoc" />
+
+
+<meta name="author" content="Łukasz Prokulski" />
+
+<meta name="date" content="2019-05-17" />
+
+<title>Jak interpretować wyniki analizy komponentów głównych (PCA)?</title>
+
+<script src="blog_post_files/jquery-1.11.3/jquery.min.js"></script>
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<link href="blog_post_files/bootstrap-3.3.5/css/bootstrap.min.css" rel="stylesheet" />
+<script src="blog_post_files/bootstrap-3.3.5/js/bootstrap.min.js"></script>
+<script src="blog_post_files/bootstrap-3.3.5/shim/html5shiv.min.js"></script>
+<script src="blog_post_files/bootstrap-3.3.5/shim/respond.min.js"></script>
+<script src="blog_post_files/navigation-1.1/tabsets.js"></script>
+<link href="blog_post_files/highlightjs-9.12.0/default.css" rel="stylesheet" />
+<script src="blog_post_files/highlightjs-9.12.0/highlight.js"></script>
+
+<style type="text/css">code{white-space: pre;}</style>
+<style type="text/css">
+  pre:not([class]) {
+    background-color: white;
+  }
+</style>
+<script type="text/javascript">
+if (window.hljs) {
+  hljs.configure({languages: []});
+  hljs.initHighlightingOnLoad();
+  if (document.readyState && document.readyState === "complete") {
+    window.setTimeout(function() { hljs.initHighlighting(); }, 0);
+  }
+}
+</script>
+
+
+
+<style type="text/css">
+h1 {
+  font-size: 34px;
+}
+h1.title {
+  font-size: 38px;
+}
+h2 {
+  font-size: 30px;
+}
+h3 {
+  font-size: 24px;
+}
+h4 {
+  font-size: 18px;
+}
+h5 {
+  font-size: 16px;
+}
+h6 {
+  font-size: 12px;
+}
+.table th:not([align]) {
+  text-align: left;
+}
+</style>
+
+
+
+
+<style type = "text/css">
+.main-container {
+  max-width: 940px;
+  margin-left: auto;
+  margin-right: auto;
+}
+code {
+  color: inherit;
+  background-color: rgba(0, 0, 0, 0.04);
+}
+img {
+  max-width:100%;
+  height: auto;
+}
+.tabbed-pane {
+  padding-top: 12px;
+}
+.html-widget {
+  margin-bottom: 20px;
+}
+button.code-folding-btn:focus {
+  outline: none;
+}
+summary {
+  display: list-item;
+}
+</style>
+
+
+
+<!-- tabsets -->
+
+<style type="text/css">
+.tabset-dropdown > .nav-tabs {
+  display: inline-table;
+  max-height: 500px;
+  min-height: 44px;
+  overflow-y: auto;
+  background: white;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+}
+
+.tabset-dropdown > .nav-tabs > li.active:before {
+  content: "";
+  font-family: 'Glyphicons Halflings';
+  display: inline-block;
+  padding: 10px;
+  border-right: 1px solid #ddd;
+}
+
+.tabset-dropdown > .nav-tabs.nav-tabs-open > li.active:before {
+  content: "&#xe258;";
+  border: none;
+}
+
+.tabset-dropdown > .nav-tabs.nav-tabs-open:before {
+  content: "";
+  font-family: 'Glyphicons Halflings';
+  display: inline-block;
+  padding: 10px;
+  border-right: 1px solid #ddd;
+}
+
+.tabset-dropdown > .nav-tabs > li.active {
+  display: block;
+}
+
+.tabset-dropdown > .nav-tabs > li > a,
+.tabset-dropdown > .nav-tabs > li > a:focus,
+.tabset-dropdown > .nav-tabs > li > a:hover {
+  border: none;
+  display: inline-block;
+  border-radius: 4px;
+}
+
+.tabset-dropdown > .nav-tabs.nav-tabs-open > li {
+  display: block;
+  float: none;
+}
+
+.tabset-dropdown > .nav-tabs > li {
+  display: none;
+}
+</style>
+
+<script>
+$(document).ready(function () {
+  window.buildTabsets("TOC");
+});
+
+$(document).ready(function () {
+  $('.tabset-dropdown > .nav-tabs > li').click(function () {
+    $(this).parent().toggleClass('nav-tabs-open')
+  });
+});
+</script>
+
+<!-- code folding -->
+
+
+
+
+</head>
+
+<body>
+
+
+<div class="container-fluid main-container">
+
+
+
+
+<div class="fluid-row" id="header">
+
+
+
+<h1 class="title toc-ignore">Jak interpretować wyniki analizy komponentów głównych (PCA)?</h1>
+<h4 class="author">Łukasz Prokulski</h4>
+<h4 class="date">2019-05-17</h4>
+
+</div>
+
+
+<p>W sieci dostępne jest multum informacji na czym polega metoda PCA, jednak ich istotnym problemem jest to, że za bardzo skupiają się na stronie matematycznej, a za mało na tym jak interpretować, rozumieć i wyjaśniać wyniki osobom nieobeznanym w statystyce i naukach ścisłych.</p>
+<blockquote>
+<p>Dzisiejszy wpis jest wpisem gościnnym - autorem poniższego tekstu jest <a href="http://iwoaugustynski.ue.wroc.pl/pl/">dr Iwo Augustyński</a>.</p>
+</blockquote>
+<p>W sieci dostępne jest multum informacji na czym polega metoda PCA, jednak ich istotnym problemem według mnie jest to, że za bardzo skupiają się na stronie matematycznej a za mało na tym jak interpretować, rozumieć i wyjaśniać wyniki osobom nieobeznanym w statystyce i naukach ścisłych. Celem poniższego artykułu jest wypełnienie tej luki. Zanim jednak przejdziemy do wyjaśnień parę słów wstępu na temat działu statystyki, z którego metoda PCA się wywodzi.</p>
+<div id="analiza-czynnikowa" class="section level2">
+<h2>Analiza czynnikowa</h2>
+<p>Rola analizy czynnikowej jest raczej skromna - może ona dopomóc do uzyskania pierwszych przybliżonych zarysów prawidłowości, tkwiących u podłoża danej dziedziny. [1, s. 18]. Jej zaletą jest jednak to, że metoda ta, w znacznie mniejszym stopniu niż inne, wymaga tworzenia wstępnych hipotez. [1, s.25] Nie wymaga też wstępnych założeń co do tego, które zmienne są niezależne, a które zależne, nie przesądza sprawy związku przyczynowego. [1, s.28]</p>
+<p>Główne założenie analizy czynnikowej można sformułować następująco: <strong>zjawiska w określonej dziedzinie badań mimo całej swej różnorodności i zmienności są ze sobą jakoś powiązane i jednocześnie, przynajmniej w części wyznaczone przez stosunkowo małą ilość jednostek funkcjonalnych, parametrów albo czynników</strong>. [1, s.18]</p>
+<p>Zastosowania analizy czynnikowej nie ograniczają się do wstępnych stadiów badania. Ponieważ jest ona dość czułym narzędziem ilościowym, może służyć bardziej niż inne metody statystyczne do sprawdzania bardziej złożonych hipotez. Przy pomocy analizy czynnikowej możemy nie tylko stwierdzać <em>czy</em> istnieje jakaś zależność ale również ustalać <em>w jakiej mierze</em> istnieje. [1, s.27]</p>
+<p><strong>W analizie czynnikowej opieramy się na korelacjach</strong>. Najczęściej posługujemy się zwykłym współczynnikiem korelacji Pearsona, który opiera się na założeniu, że badana zależność ma charakter prostoliniowy, tzn. przedstawiona w formie wykresu da linię prostą [1, s.22]. Nie jest to jednak wielki problem gdyż metoda ta, jak wspomniano służy uzyskaniu wstępnych, przybliżonych zarysów prawidłowości. Trzeba dodać, że współczynnik Pearsona nadaje się do zmiennych wymierzalnych w sposób ciągły i raczej dla większych prób (N&gt;=50).</p>
+</div>
+<div id="metoda-pca" class="section level2">
+<h2>Metoda PCA</h2>
+<p>Metoda PCA jest szczególnym przypadkiem analizy czynnikowej. Tak samo jak ona może służyć do takiego przekształcenia danych aby uzyskać jak największe różnice w korelacjach między zmiennymi. Do tego celu wykorzystuje ona właściwości wektorów własnych (eigenvectors) i wielkości własnych (eigenvalues). Ich cechy szczególne a zwłaszcza ortogonalność (prostopadłość) stanowi o tym, że metoda ta stanowi tylko fragment analizy czynnikowej.</p>
+<p>Cechy wektorów własnych:</p>
+<ul>
+<li>występują tylko dla macierzy kwadratowych</li>
+<li>nie każda macierz kwadratowa je ma</li>
+<li>macierz o wymiarach nxn ma (jeśli w ogóle) n wektorów własnych</li>
+<li>wszystkie są do siebie prostopadłe</li>
+<li>wszystkie zaczynają się w punkcie 0</li>
+<li>każdemu wektorowi własnemu towarzyszy wartość własna</li>
+</ul>
+<p>Wielkość wartości własnej prezentuje “rozpiętość danych” wokół prostej na której leży wektor własny (stąd jego długość nie ma znaczenia i zwykle się go podaje w takiej postaci, żeby miał długość jeden).</p>
+<p>W PCA zakłada się, że im większa rozpiętość (czyli wariancja) tym lepsza zmienna (cecha) bo niesie w sobie więcej informacji. I odwrotnie, jeśli wartość własna jest bardzo mała –&gt; wariancja jest bardzo mała –&gt; dane są skupione na prostej, na której leży dany wektor własny –&gt; cecha wnosi niewiele informacji.</p>
+<p>Więc, jeżeli cech jest n to mamy n wymiarową macierz kowariancji i 0 lub n wektorów własnych z towarzyszącymi im wartościami własnymi. Jeśli uporządkujemy następnie wektory te według wartości własnych od największej do najmniejszej to w ten sposób uporządkujemy cechy od najbardziej “różnorodnej” do najbardziej “skupionej”.</p>
+<p>Po takim uszeregowaniu można na przykład uznać, że ignorujemy cechy, dla których wartości własne są poniżej przyjętego progu. Im więcej cech wyeliminujemy tym bardziej ograniczymy liczbę wymiarów bo “wycinamy” część wektorów własnych (prostych, na których leżą). Można więc na przykład przyjąć, że wybieramy tylko 3 najważniejsze cechy, bo tyle wymiarów da się pokazać na obrazku.</p>
+</div>
+<div id="jak-interpretowac-wyniki-pca" class="section level2">
+<h2>Jak interpretować wyniki PCA?</h2>
+<p>Po tym dość teoretycznym wstępie (jeśli był jednak za krótki to polecam źródła podane na końcu) pora odpowiedzieć na tytułowe pytanie.</p>
+<p>Zacznijmy od takiego przykładu - zebraliśmy następujące dane na temat mieszkań w naszym mieście:</p>
+<ul>
+<li>wielkość (m2)</li>
+<li>liczba pokoi</li>
+<li>liczba łazienek</li>
+<li>liczba przystanków (linii) MPK w okolicy</li>
+<li>poziom przestępczości</li>
+</ul>
+<p>Zebrane dane miałyby postać tabeli:</p>
+<table>
+<thead>
+<tr class="header">
+<th>wielkość (m2)</th>
+<th>l. pokoi</th>
+<th>l. łazienek</th>
+<th>l. przystanków</th>
+<th>poziom przestępczości</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td>a1</td>
+<td>b1</td>
+<td>c1</td>
+<td>d1</td>
+<td>e1</td>
+</tr>
+<tr class="even">
+<td>a2</td>
+<td>b2</td>
+<td>c2</td>
+<td>d2</td>
+<td>e2</td>
+</tr>
+<tr class="odd">
+<td>.</td>
+<td>.</td>
+<td>.</td>
+<td>.</td>
+<td>.</td>
+</tr>
+<tr class="even">
+<td>an</td>
+<td>bn</td>
+<td>cn</td>
+<td>dn</td>
+<td>en</td>
+</tr>
+</tbody>
+</table>
+<p>Chcemy sprawdzić, czy występują jakieś ukryte zależności łączące ze sobą niektóre z tych cech w grupy. Naturalnie grup tych nie może być więcej niż cech (jedna cecha nie może być w więcej niż jednej grupie).</p>
+<p>Jeśli się bliżej przyjrzymy naszemu przykładowi to będziemy mogli wytypować dwa “ukryte” czynniki “sterujące” naszymi cechami “spoza sceny”:</p>
+<table>
+<thead>
+<tr class="header">
+<th>rozmiar</th>
+<th>lokalizacja</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td>wielkość</td>
+<td>liczba przystanków MPK</td>
+</tr>
+<tr class="even">
+<td>liczba pokoi</td>
+<td>poziom przestępczości</td>
+</tr>
+<tr class="odd">
+<td>liczba łazienek</td>
+<td></td>
+</tr>
+</tbody>
+</table>
+<p>Prawdopodobne jest istnienie bliskiego związku (korelacji) w ramach pierwszej grupy i w ramach drugiej grupy oraz brak związku między cechami z różnych grup. Metoda PCA robi właśnie to co zrobiliśmy metodą “na zdrowy rozum” a nawet o wiele więcej. Bo co z tego, że utworzyliśmy dwie grupy, skoro cech nadal mamy pięć. PCA jest za to w stanie określić, które grupy najmniej wnoszą do wyjaśnienia struktury danych.</p>
+<div id="jak-to-robi" class="section level3">
+<h3>Jak to robi?</h3>
+<p>Spójrzcie na zdjęcie poniżej.</p>
+<div class="figure">
+<img src="https://upload.wikimedia.org/wikipedia/commons/thumb/7/74/GLASWURF_BEDNARIK.JPG/256px-GLASWURF_BEDNARIK.JPG" />
+
+</div>
+<p>Jak widać przedstawia ono trójwymiarowe zdjęcie twarzy (plus nieinteresujące nas dodatki). Możemy na nie patrzeć z różnych stron. Na zdjęciu widzicie właśnie cztery dwuwymiarowe rzuty trójwymiarowej bryły. Jeśli z tych czterech rzutów wybierzemy np. dwa, które najwięcej mówią nam o przedstawionej postaci, to właśnie (w przybliżeniu) przeprowadzimy proces redukcji zmiennych przy wykorzystaniu metody PCA. PCA niejako “proponuje” nam najlepsze “punkty patrzenia” na dane a my decydujemy co dalej: czy z części z nich rezygnujemy czy staramy się zrozumieć uwidocznione relacje między cechami.</p>
+<p>Schemat postępowania można więc opisać następująco:</p>
+<ol style="list-style-type: decimal">
+<li>Przesuwamy naszą bryłę (zbiór punktów) tak, żeby mieć ją centralnie na wprost.</li>
+<li>Obracamy tak, żeby punkty te zajmowały jak największą powierzchnię widzenia.</li>
+<li>Sprawdzamy co widać z pozostałych stron: obracamy bryłę za każdym razem o 90 stopni (w PCA, w ogólnej analizie czynnikowej niekoniecznie).</li>
+<li>Odrzucamy te strony, z których najmniej widać (redukcja danych) lub staramy się zrozumieć dlaczego z danego punktu widzenia punkty utworzyły wyróżniające się grupy (analiza danych).</li>
+</ol>
+<p>Jeśli mielibyśmy trójwymiarowe zdjęcie kuli zamiast twarzy, to PCA nic by nam nie dało, bo kula z każdej strony wygląda tak samo. Jeśli jednak punkty układają się w kulę to oznacza, że nie ma między nimi korelacji a PCA opiera się na korelacji właśnie. Dlatego przeciwne ekstremum zajmuje linia prosta, która oznacza, że wszystkie cechy są ze sobą w 100% skorelowane. Wtedy wystarczy jeden wymiar (czyli prosta), żeby zachować wszystkie informacje.</p>
+<p>Inny przykład:</p>
+<p>Mamy <a href="https://en.wikipedia.org/wiki/Iris_flower_data_set">dane na temat irysów</a> (petal to płatek a sepal to <a href="https://pl.wikipedia.org/wiki/Kielich_(botanika)">zielona działka kielicha</a>):</p>
+<table>
+<thead>
+<tr class="header">
+<th align="left">Petal.Length</th>
+<th align="left">Sepal.Width</th>
+<th align="left">Petal.Length</th>
+<th align="left">Petal.Width</th>
+<th align="left">Gatunek</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td align="left">Min. :4.300</td>
+<td align="left">Min. :2.000</td>
+<td align="left">Min. :1.000</td>
+<td align="left">Min. :0.100</td>
+<td align="left">setosa :50</td>
+</tr>
+<tr class="even">
+<td align="left">Mediana :5.800</td>
+<td align="left">Mediana :3.000</td>
+<td align="left">Mediana :4.350</td>
+<td align="left">Mediana :1.300</td>
+<td align="left">versicolor :50</td>
+</tr>
+<tr class="odd">
+<td align="left">Średnia :5.843</td>
+<td align="left">Średnia :3.057</td>
+<td align="left">Średnia :3.758</td>
+<td align="left">Średnia :1.199</td>
+<td align="left">virginica :50</td>
+</tr>
+<tr class="even">
+<td align="left">Max. :7.900</td>
+<td align="left">Max. :4.400</td>
+<td align="left">Max. :6.900</td>
+<td align="left">Max. :2.500</td>
+<td align="left"></td>
+</tr>
+</tbody>
+</table>
+<p>Jak widać mamy cztery wymiary plus dla każdego kwiatka przyporządkowaną nazwę gatunkową. Wszytkich kwiatków w bazie jest 150. Wartości cech pierwszych 10 irysów wygladają następująco:</p>
+<table>
+<thead>
+<tr class="header">
+<th align="right">Sepal.Length</th>
+<th align="right">Sepal.Width</th>
+<th align="right">Petal.Length</th>
+<th align="right">Petal.Width</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td align="right">5.1</td>
+<td align="right">3.5</td>
+<td align="right">1.4</td>
+<td align="right">0.2</td>
+</tr>
+<tr class="even">
+<td align="right">4.9</td>
+<td align="right">3.0</td>
+<td align="right">1.4</td>
+<td align="right">0.2</td>
+</tr>
+<tr class="odd">
+<td align="right">4.7</td>
+<td align="right">3.2</td>
+<td align="right">1.3</td>
+<td align="right">0.2</td>
+</tr>
+<tr class="even">
+<td align="right">4.6</td>
+<td align="right">3.1</td>
+<td align="right">1.5</td>
+<td align="right">0.2</td>
+</tr>
+<tr class="odd">
+<td align="right">5.0</td>
+<td align="right">3.6</td>
+<td align="right">1.4</td>
+<td align="right">0.2</td>
+</tr>
+<tr class="even">
+<td align="right">5.4</td>
+<td align="right">3.9</td>
+<td align="right">1.7</td>
+<td align="right">0.4</td>
+</tr>
+<tr class="odd">
+<td align="right">4.6</td>
+<td align="right">3.4</td>
+<td align="right">1.4</td>
+<td align="right">0.3</td>
+</tr>
+<tr class="even">
+<td align="right">5.0</td>
+<td align="right">3.4</td>
+<td align="right">1.5</td>
+<td align="right">0.2</td>
+</tr>
+<tr class="odd">
+<td align="right">4.4</td>
+<td align="right">2.9</td>
+<td align="right">1.4</td>
+<td align="right">0.2</td>
+</tr>
+<tr class="even">
+<td align="right">4.9</td>
+<td align="right">3.1</td>
+<td align="right">1.5</td>
+<td align="right">0.1</td>
+</tr>
+</tbody>
+</table>
+<p>Chcąc wykorzystać metodę PCA należy najpierw dane znormalizować (przesunąć tak, żeby środek układu współrzędnych był pośrodku danych oraz dane były w tej samej skali np. liczby odchyleń standardowych). Po tej operacji cechy naszych kwiatków będą wyglądały tak:</p>
+<table>
+<thead>
+<tr class="header">
+<th align="right">Sepal.Length</th>
+<th align="right">Sepal.Width</th>
+<th align="right">Petal.Length</th>
+<th align="right">Petal.Width</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td align="right">-0.90</td>
+<td align="right">1.02</td>
+<td align="right">-1.34</td>
+<td align="right">-1.31</td>
+</tr>
+<tr class="even">
+<td align="right">-1.14</td>
+<td align="right">-0.13</td>
+<td align="right">-1.34</td>
+<td align="right">-1.31</td>
+</tr>
+<tr class="odd">
+<td align="right">-1.38</td>
+<td align="right">0.33</td>
+<td align="right">-1.39</td>
+<td align="right">-1.31</td>
+</tr>
+<tr class="even">
+<td align="right">-1.50</td>
+<td align="right">0.10</td>
+<td align="right">-1.28</td>
+<td align="right">-1.31</td>
+</tr>
+<tr class="odd">
+<td align="right">-1.02</td>
+<td align="right">1.25</td>
+<td align="right">-1.34</td>
+<td align="right">-1.31</td>
+</tr>
+<tr class="even">
+<td align="right">-0.54</td>
+<td align="right">1.93</td>
+<td align="right">-1.17</td>
+<td align="right">-1.05</td>
+</tr>
+<tr class="odd">
+<td align="right">-1.50</td>
+<td align="right">0.79</td>
+<td align="right">-1.34</td>
+<td align="right">-1.18</td>
+</tr>
+<tr class="even">
+<td align="right">-1.02</td>
+<td align="right">0.79</td>
+<td align="right">-1.28</td>
+<td align="right">-1.31</td>
+</tr>
+<tr class="odd">
+<td align="right">-1.74</td>
+<td align="right">-0.36</td>
+<td align="right">-1.34</td>
+<td align="right">-1.31</td>
+</tr>
+<tr class="even">
+<td align="right">-1.14</td>
+<td align="right">0.10</td>
+<td align="right">-1.28</td>
+<td align="right">-1.44</td>
+</tr>
+</tbody>
+</table>
+<p>Na rysunkach efekt widać lepiej: <img src="PCA_org.png" /> <img src="PCA_norm.png" /></p>
+<p>Oba obrazki różnią się jedynie cyframi na osiach.</p>
+<p>Do tak poprawionych danych można zastosować PCA. W efekcie ten czterowymiarowy zbiór kwiatków zostaje obrócony tak, żeby jak najbardziej uwydatnić różnice między nimi (nawiązując do poprzedniego przykładu teraz “patrzymy danym prosto w twarz”): <img src="PCA_pca.png" /></p>
+<p>W efekcie gatunek “setosa” różni się znacznie wyraźniej niż w oryginalnych danych a pozostałe dwa gatunki pokrywają się w znacznie mniejszym zakresie. Punkty w ramach każdego gatunku uległy również zagęszczeniu.</p>
+</div>
+<div id="podsumowanie" class="section level3">
+<h3>Podsumowanie</h3>
+<p>Metodę PCA można stosować tylko do danych liczbowych (czyli nie czynnikowych takich jak gatunek w drugim przykładzie, choćby były kodowane numerami jak np. linie autobusowe) zarówno do wstępnej analizy danych jak i do redukcji liczby cech (wymiarów). Może ona dopomóc w uzyskaniu pierwszych przybliżonych zarysów prawidłowości, tkwiących u podłoża danego zjawiska. Wstępnych, ponieważ opiera się na korelacji, <a href="http://tylervigen.com/spurious-correlations">która może być bardzo myląca</a>.</p>
+<p>Mam nadzieję, że powyższy wpis pomoże Wam zrozumieć lub lepiej wyjaśnić innym na czym polega ta tak popularna w data science metoda.</p>
+<p>dr Iwo Augustyński</p>
+<hr />
+<p>Opracowano na podstawie:</p>
+<ul>
+<li>Jan Okoń, “Analiza czynnikowa w psychologii”, PWN, Warszawa 1964</li>
+<li><a href="http://www.cs.otago.ac.nz/cosc453/student_tutorials/principal_components.pdf">A tutorial on Principal Components Analysis</a> (pdf)</li>
+<li><a href="https://www.khanacademy.org/math/linear-algebra/alternate-bases/eigen-everything/v/linear-algebra-introduction-to-eigenvalues-and-eigenvectors">Introduction to eigenvalues and eigenvectors</a> (video)</li>
+<li><a href="https://towardsdatascience.com/dimensionality-reduction-for-dummies-part-2-3b1e3490bdc9">Dimensionality Reduction For Dummies — Part 2: Laying The Bricks</a></li>
+<li><a href="https://towardsdatascience.com/dimensionality-reduction-for-dummies-part-3-f25729f74c0a">Dimensionality Reduction For Dummies — Part 3: Connect The Dots</a></li>
+<li><a href="https://youtu.be/g-Hb26agBFg">Principal Component Analysis (PCA)</a> (video)</li>
+<li><a href="https://youtu.be/xKl4LJAXnEA">Principal components analysis in R</a> (video)</li>
+</ul>
+</div>
+</div>
+
+
+
+
+</div>
+
+<script>
+
+// add bootstrap table styles to pandoc tables
+function bootstrapStylePandocTables() {
+  $('tr.header').parent('thead').parent('table').addClass('table table-condensed');
+}
+$(document).ready(function () {
+  bootstrapStylePandocTables();
+});
+
+
+</script>
+
+<!-- dynamically load mathjax for compatibility with self-contained -->
+<script>
+  (function () {
+    var script = document.createElement("script");
+    script.type = "text/javascript";
+    script.src  = "https://mathjax.rstudio.com/latest/MathJax.js?config=TeX-AMS-MML_HTMLorMML";
+    document.getElementsByTagName("head")[0].appendChild(script);
+  })();
+</script>
+
+</body>
+</html>

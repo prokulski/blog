@@ -1,0 +1,534 @@
+---
+title: "Gole w europejskich ligach"
+author: "Łukasz Prokulski"
+date: "`r Sys.Date()`"
+output: 
+  html_document: 
+    fig_width: 10
+    fig_height: 6
+    fig_align: "center"
+    self_contained: no
+---
+
+Skąd padają gole? Jak poruszają się piłkarze podczas meczu? Czy zawodnicy podają zawsze do tych samych?
+
+```{r document_setup, echo=FALSE, message=FALSE, error=FALSE, warning=FALSE}
+library(tidyverse)
+library(knitr)
+library(kableExtra)
+
+# chunks options
+opts_chunk$set(message = FALSE, error = FALSE, warning = FALSE)
+options(knitr.table.format = "html") 
+
+source("/home/lemur/RProjects/!Rmarkdown_templates/da_plot.R")
+```
+
+
+Wszystkiego tego można się dowiedzieć jak tylko ma się odpowiednie dane... Warto przeglądać czasem Reddita - można znaleźć np. [Soccer shots dataset](https://blog.prokulski.science/l.php?t=gole_w_ligach&u=https://www.reddit.com/r/datasets/comments/bg1el1/soccer_shots_dataset/) (post już jest skasowany, ale kto pierwszy ten lepszy) zawierający link do [arkusza z danymi](https://blog.prokulski.science/l.php?t=gole_w_ligach&u=https://drive.google.com/open?id=1yeIl0rZldsmmRzdGUkG56QmX7UXI0PHQ) zeskrapowanymi z ciekawej strony [understat.com](https://blog.prokulski.science/l.php?t=gole_w_ligach&u=https://understat.com/).
+
+Skoro ktoś *zdjął* te dane i udało mi się zapisać do nich link to wykorzystajmy je!
+
+W pierwszej kolejności musimy pobrać dane z Google Drive - lepiej mieć niż nie mieć ;) 
+
+
+```{r echo=FALSE}
+library(tidyverse)
+library(janitor)
+library(igraph)
+```
+```{r eval=FALSE}
+# Będziemy potrzebowac standardowo pakietów:
+library(tidyverse)
+library(janitor)
+library(igraph)
+
+# a żeby pobrac dane z Google Drive wystarczy:
+library(googledrive)
+
+"1yeIl0rZldsmmRzdGUkG56QmX7UXI0PHQ" %>%
+  as_id() %>%
+  drive_get() %>%
+  drive_download(path = "xg_master.csv")
+```
+
+I w pliczku **"xg_master.csv** mamy interesujące nas dane. Zobaczmy co mamy w środku:
+
+
+```{r}
+data <- read_csv("xg_master.csv") %>%
+  clean_names() %>%
+  mutate(player = stringi::stri_enc_tonative(player),
+         assist_player = stringi::stri_enc_tonative(assist_player))
+```
+
+Po standardowych *glimpse()* wiemy co i jak, na przykład wiemy że dane pochodzą z kilku sezonów i obejmują ligi europejskie z następującymi drużynami:
+
+```{r}
+data %>%
+  distinct(league, team) %>%
+  group_by(league) %>%
+  arrange(team) %>%
+  mutate(n = row_number()) %>%
+  ungroup() %>%
+  spread(league, team, fill = "") %>%
+  select(-n) %>%
+  kable() %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"))
+```
+
+Jedna kolumna określa nam skuteczność strzału, a druga - sytuację. możemy więc zobaczyć...
+
+```{r gole_01}
+# skąd co pada?
+data %>%
+  ggplot() +
+  geom_point(aes(x_coordinate, y_coordinate,
+                 color = situation),
+             alpha = 0.7, size = 0.5, show.legend = FALSE) +
+  facet_grid(situation~result) +
+  # boisko
+  xlim(c(0, 1)) +
+  ylim(c(0, 1)) +
+  geom_rect(aes(xmin = 0, ymin = 0, xmax = 1, ymax = 1), fill = NA, color = "black") +
+  geom_rect(aes(xmin = 0, ymin = 0, xmax = 0.5, ymax = 1), fill = NA, color = "black") +
+  geom_rect(aes(xmin = 0, ymin = 0.2, xmax = 0.157, ymax = 0.8), fill = NA, color = "black") +
+  geom_rect(aes(xmin = 1, ymin = 0.2, xmax = 1-0.157, ymax = 0.8), fill = NA, color = "black") +
+  labs(title = "Skąd padają strzały?", x = "", y = "") +
+  theme_void() -> plot
+
+da_plot(plot, blank_x = T, blank_y = T)
+```
+
+Prześledźmy na szybko rozkład informacji w kolumnach *kategorycznych*:
+
+```{r}
+data %>% count(result, sort = TRUE) %>%
+  kable() %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"))
+```
+
+```{r}
+data %>% filter(result == "Goal") %>% count(shot_type, sort = TRUE) %>%
+  kable() %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"))
+```
+
+```{r}
+data %>% filter(result == "Goal") %>% count(situation, sort = TRUE) %>%
+  kable() %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"))
+```
+
+```{r}
+data %>% filter(result == "Goal") %>% count(preceding_action, sort = TRUE) %>%
+  kable() %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"))
+```
+
+Ciekawe Tak sobie. Ciekawsze jest to, w której minucie padają gole. Zamiast liczyć jakąś średnią policzmy po prostu sumę bramek, które padły w kolejnych minutach:
+
+```{r gole_02}
+data %>%
+  filter(result == "Goal") %>%
+  filter(minute <= 92) %>%
+  count(minute) %>%
+  ggplot() +
+  geom_line(aes(minute, n), color = "green") +
+  geom_smooth(aes(minute, n), color = "lightgreen", alpha = 0.5) +
+  geom_vline(xintercept = c(45, 90)) +
+  labs(title = "Liczba bramek w zależności od minuty meczu",
+       x = "Minuta meczu",
+       y = "Łączna liczba bramek") -> plot
+
+da_plot(plot)
+```
+
+Dlaczego tuż po 45 minucie mamy skok? To **gol do szatnii** - nieco przedłużona pierwsza połowa i gol w ostatniej chwili.
+
+Niesamowite jest to, że im dłużej trwa mecz tym więcej bramek pada, tzn. więcej bramek pada w *późniejszych* minutach. Wydawałoby się, że zmęczenie i - czasem - granie na czas dadzą zna oo sobie i więcej będzie goli w pierwszej połowie. A tutaj zonk. W sumie fajny zonk, bo oznacza to tyle że emocje są do końca.
+
+Podzielmy czas na 5-minutowe bloki i sprawdźmy jak w poszczególnych ligach wygląda liczba zdobytych bramek. Tym razem jednak licząc jaki procent bramek z całej ligi wpada w danym bloku:
+
+```{r gole_03}
+# bloki po 5 minut, zależność od ligi
+data %>%
+  filter(result == "Goal") %>%
+  mutate(minute = 5*( minute %/% 5) ) %>%
+  count(minute, league) %>%
+  group_by(league) %>%
+  mutate(n = 100*n/sum(n)) %>%
+  ungroup %>%
+  ggplot() +
+  geom_tile(aes(minute, league, fill = n), color = "gray50") +
+  scale_fill_distiller(palette = "Reds", direction = 1) +
+  geom_vline(xintercept = c(45, 90)) +
+  labs(title = "Procent bramek w meczu zależności od minuty meczu",
+       x = "Minuta meczu",
+       y = "",
+       fill = "Procent bramek w lidze") -> plot
+
+da_plot(plot, legend_bottom = T)
+```
+
+Znowu widać 45 minutę. Szczególnie w angielskiej Premiere League można liczy na emocje. W sumie około 6% (co 16 mecz) to bramka pod koniec I połowy.
+
+
+Skupmy się na chwilę na konkretnych zawodnikach. Na przykład Neymar (ulubiony piłkarz mojego syna) - czy strzela w Paris Saint Germain lepiej niż w Barcelonie?
+
+```{r gole_04, fig.height=4, fig.width=8}
+data %>%
+  filter(player == "Neymar") %>%
+  filter(result == "Goal") %>%
+  count(date, team) %>%
+  ggplot() +
+  geom_point(aes(date, n, color = team)) +
+  labs(title = "Neymar: Barcelona vs PSG",
+       color = "", x = "", y = "Liczba strzelonych\nbramek w meczu") -> plot
+
+da_plot(plot, legend_bottom = T)
+```
+
+Strzela mniej więcej tak samo jeśli chodzi o liczbę zdobytych bramek w meczu. A czy strzela z innego miejsca? Może trener coś wypracował i zmieniło się ustawienie?
+
+```{r gole_05}
+# skąd strzela
+data %>%
+  filter(player == "Neymar") %>%
+  filter(result == "Goal") %>%
+  ggplot() +
+  geom_point(aes(x_coordinate, y_coordinate, color = team)) +
+  # boisko
+  xlim(c(0, 1)) +
+  ylim(c(0, 1)) +
+  geom_rect(aes(xmin = 0, ymin = 0, xmax = 1, ymax = 1), fill = NA, color = "black") +
+  geom_rect(aes(xmin = 0, ymin = 0, xmax = 0.5, ymax = 1), fill = NA, color = "black") +
+  geom_rect(aes(xmin = 0, ymin = 0.2, xmax = 0.157, ymax = 0.8), fill = NA, color = "black") +
+  geom_rect(aes(xmin = 1, ymin = 0.2, xmax = 1-0.157, ymax = 0.8), fill = NA, color = "black") +
+  labs(title = "Neymar: Barcelona vs PSG", x = "", y = "", color = "") +
+  theme_void() -> plot
+
+da_plot(plot, blank_x = T, blank_y = T, legend_bottom = T)
+```
+
+To, że czerwonych kropek jest więcej oznacza tylko tyle, że dłużej grał w Barcy. Strzela mniej więcej z tego samego miejsca. No, w PSG ładuje trochę sprzed pola karnego.
+
+Zobaczmy jak inni. Na początek przygotujemy fragment danych - 12 piłkarzy, którzy strzelili najwięcej bramek:
+
+```{r}
+top_strikers <- data %>%
+  filter(result == "Goal") %>%
+  count(player, sort = T) %>%
+  top_n(12, n) %>%
+  pull(player)
+```
+
+```{r results='asis'}
+cat("<ul>\n<li>")
+cat(paste0(top_strikers, collapse = "</li>\n<li>"))
+cat("</li>\n</ul>\n")
+```
+
+Skąd strzelają bramki ci panowie?
+
+
+```{r gole_06}
+data %>%
+  filter(player %in% top_strikers) %>%
+  filter(result == "Goal") %>%
+  ggplot() +
+  geom_point(aes(x_coordinate, y_coordinate, color = player),
+             show.legend = FALSE) +
+  facet_wrap(~player) +
+  # boisko
+  xlim(c(0, 1)) +
+  ylim(c(0, 1)) +
+  geom_rect(aes(xmin = 0, ymin = 0, xmax = 1, ymax = 1), fill = NA, color = "black") +
+  geom_rect(aes(xmin = 0, ymin = 0, xmax = 0.5, ymax = 1), fill = NA, color = "black") +
+  geom_rect(aes(xmin = 0, ymin = 0.2, xmax = 0.157, ymax = 0.8), fill = NA, color = "black") +
+  geom_rect(aes(xmin = 1, ymin = 0.2, xmax = 1-0.157, ymax = 0.8), fill = NA, color = "black") +
+  labs(title = "Skąd padają bramki strzelone przez...", x = "", y = "") +
+  theme_void() -> plot
+
+da_plot(plot, blank_x = T, blank_y = T)
+```
+
+Tutaj jest jedna ciekawostka - Messi strzelający gola z prawego dolnego rogu boiska. Możemy poszukać tej bramki:
+
+```{r}
+data %>%
+  filter(player == "Lionel Messi", result == "Goal") %>%
+  filter(y_coordinate == min(y_coordinate)) %>%
+  t() %>%
+  as.data.frame() %>% rownames_to_column() %>% set_names(c("Feature", "Value")) %>%
+  kable()  %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"))
+```
+
+
+[Chwila w Google](https://blog.prokulski.science/l.php?t=gole_w_ligach&u=https://www.google.com/search?q=Barcelona+-+Athletic+Club+2017-02-04) z wyszukaniem odpowiedniego meczu i mamy [wynik](https://blog.prokulski.science/l.php?t=gole_w_ligach&u=https://youtu.be/VRDKncBV7eU?t=230) jak poniżej:
+
+<iframe width="560" height="315" src="https://www.youtube.com/embed/VRDKncBV7eU?start=230" frameborder="0" allow="accelerometer; autoplay; encrypted-media; gyroscope; picture-in-picture" allowfullscreen></iframe>
+
+
+A z jakiej odległości padają strzały? Nie będziemy tego przeliczać na metry, a na jednostki względne od środka bramki (punkt (1,0.5) w układzie współrzędnych boiska):
+
+```{r gole_07}
+data %>%
+  filter(player %in% top_strikers) %>%
+  filter(result == "Goal") %>%
+  mutate(distance = sqrt((x_coordinate-1)^2 + (y_coordinate-0.5)^2)) %>%
+  group_by(player) %>%
+  mutate(m_dist = mean(distance)) %>%
+  ungroup() %>%
+  arrange(m_dist) %>%
+  mutate(player = fct_inorder(player)) %>%
+  ggplot() +
+  geom_boxplot(aes(player, distance, fill = player), color = "black",
+               show.legend = FALSE) +
+  coord_flip() +
+  labs(title = "Z jakiej odległości od bramki padają gole?",
+       x = "", y  = "Odległośc [skala względna]") -> plot
+
+da_plot(plot)
+```
+
+Wykres ułożono jest według średniej odległości, a kreska w *pudełku* mówi o medianie. Wcześniej widzieliśmy, że wszyscy strzelają głównie z pola karnego, zatem nic dziwnego że wyniki są zbliżone.
+
+Poszukajmy najdalszego strzału:
+
+```{r}
+data %>%
+  filter(result == "Goal") %>%
+  mutate(distance = sqrt((x_coordinate-1)^2 + (y_coordinate-0.5)^2)) %>%
+  filter(distance == max(distance)) %>%
+  t() %>%
+  as.data.frame() %>% rownames_to_column() %>% set_names(c("Feature", "Value")) %>%
+  kable() %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"))
+```
+
+Znowu chwila z Google i mamy:
+
+<center>
+<iframe width="560" height="315" src="https://www.youtube.com/embed/EhMhqz0qvUo" frameborder="0" allow="accelerometer; autoplay; encrypted-media; gyroscope; picture-in-picture" allowfullscreen></iframe>
+</center>
+
+
+Jak wygląda rozkład wyników w poszczególnych ligach? Jaki wynik meczu jest najpopularniejszy?
+Poniższy wykres to obrazuje:
+
+```{r gole_12, fig.width=12, fig.height=8}
+data %>%
+  select(league, home_goals, away_goals, match_id) %>%
+  distinct(match_id, .keep_all = TRUE) %>%
+  count(league, away_goals, home_goals, sort = T) %>%
+  group_by(league) %>%
+  mutate(p = 100*n/sum(n)) %>%
+  ungroup() %>%
+  ggplot() +
+  geom_tile(aes(home_goals, away_goals, fill = p), color = "black", show.legend = FALSE) +
+  geom_text(aes(home_goals, away_goals, label = sprintf("%.f%%", p))) +
+  scale_x_continuous(breaks = 0:10, limits = c(-1,11)) +
+  scale_y_continuous(breaks = 0:10, limits = c(-1,11)) +
+  scale_fill_distiller(palette = "Reds", direction = 1) +
+  labs(title = "Rozkład wyników w meczach",
+       x = "Gospodarze", y = "Goście") +
+  facet_wrap(~league) -> plot
+
+da_plot(plot)
+```
+
+Najpopularniejsze wyniki to 1:1 albo 1:0 (czy też 0:1). Zdaje się, że rozkład liczby bramek w meczu to rozkład Poissona - to warto wiedzie, jeśli się chce budować jakieś modele przewidujące wyniki.
+
+Przejdźmy na poziom dwóch drużyn. Na początek policzymy sobie dane mówiące o rozkładzie wyników spotkań wszystkich drużyn z każdej ligi pomiędzy sobą:
+
+```{r}
+data_pairs <- data %>%
+  select(home, away, league, home_goals, away_goals, match_id) %>%
+  distinct(match_id, .keep_all = TRUE) %>%
+  mutate(hG = if_else(home < away, home_goals, away_goals),
+         aG = if_else(home < away, away_goals, home_goals),
+         h = if_else(home < away, home, away),
+         a = if_else(home < away, away, home)) %>%
+  count(h, hG, a, aG) %>%
+  group_by(h, a) %>%
+  mutate(p = 100*n/sum(n)) %>%
+  ungroup()
+```
+
+Teraz wybierzemy dwie drużyny i zobaczymy jakie wyniki padły w meczach między nimi:
+
+```{r gole_08}
+A_team = "Manchester City"
+B_team = "Liverpool"
+
+data_sel <- data_pairs %>%
+  filter(h %in% c(A_team, B_team),
+         a %in% c(A_team, B_team))
+
+home_team <- data_sel %>% pull(h) %>% unique()
+away_team <- data_sel %>% pull(a) %>% unique()
+
+data_sel %>%
+  ggplot() +
+  geom_tile(aes(hG, aG, fill = p), color = "black", show.legend = FALSE) +
+  geom_text(aes(hG, aG, label = sprintf("%.f%%", p))) +
+  scale_x_continuous(breaks = 0:10, limits = c(-1,11)) +
+  scale_y_continuous(breaks = 0:10, limits = c(-1,11)) +
+  scale_fill_distiller(palette = "Reds", direction = 1) +
+  labs(title = paste("Rozkład wyników w meczach\n", home_team, "-", away_team),
+       x = home_team, y = away_team) -> plot
+
+da_plot(plot)
+```
+
+Niestety nie ma bardziej zróżnicowanych danych - Real z Barcą wygląda podobnie (każdy z wyników padł tylko jeden raz, meczy też było 10). Szkoda.
+
+Ale możemy inaczej - ile bramek strzela i ile traci Barcelona w lidze hiszpańskiej?
+
+```{r gole_09}
+sel_team = "Barcelona"
+
+# bilans rozgrywek
+data_pairs %>%
+  filter(h == sel_team | a == sel_team) %>%
+  mutate(sel_goals = if_else(h == sel_team, hG, aG),
+         other_goals =  if_else(h == sel_team, aG, hG),
+         other =  if_else(h == sel_team, a, h)) %>%
+  select(other, sel_goals, other_goals, n) %>%
+  gather("key", "val", -other, -n) %>%
+  mutate(key = factor(key, levels = c("sel_goals", "other_goals"),
+                      labels = c("Bramki strzelone", "Bramki stracone"))) %>%
+  ggplot() +
+  geom_tile(aes(other, val, fill = n), color = "black") +
+  scale_y_continuous(breaks = 0:10) +
+  scale_fill_distiller(palette = "Reds", direction = 1) +
+  facet_wrap(~key, ncol = 2) +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0, hjust = 1)) +
+  labs(title = paste0("Liczba strzelonych/straconych bramek: ", sel_team),
+       x = "Przeciwnik", y = "", fill = "Liczba bramek") -> plot
+
+da_plot(plot, legend_bottom = T)
+```
+
+Oczywiście zamiast Barcelony możemy wybrać inny zespół.
+
+A jak wygląda bilans bramek Barcy? Ile średnio goli strzela i ile traci w meczach ze swoimi rywalami z La Liga?
+
+```{r gole_10}
+data_pairs %>%
+  filter(h == sel_team | a == sel_team) %>%
+  mutate(sel_goals = if_else(h == sel_team, hG, aG),
+         other_goals =  if_else(h == sel_team, aG, hG),
+         other =  if_else(h == sel_team, a, h)) %>%
+  select(other, sel_goals, other_goals, n) %>%
+  mutate(sel_goals = n * sel_goals,
+         other_goals = n * other_goals) %>%
+  group_by(other) %>%
+  summarise(sel_goals = sum(sel_goals)/n(),
+            other_goals = sum(other_goals)/n()) %>%
+  ungroup() %>%
+  mutate(delta = sel_goals - other_goals) %>%
+  arrange(desc(delta)) %>%
+  mutate(other = fct_inorder(other) %>% fct_rev()) %>%
+  ggplot() +
+  geom_col(aes(other, sel_goals), fill = "green") +
+  geom_text(aes(other, sel_goals, label = sprintf("%.2f", sel_goals)), hjust = -0.1) +
+  geom_col(aes(other, -other_goals), fill = "red") +
+  geom_text(aes(other, -other_goals, label = sprintf("%.2f", other_goals)), hjust = 1.01) +
+  geom_point(aes(other, delta), color = "black", size = 2) +
+  # geom_text(aes(other, delta, label = sprintf("%.2f", delta)), hjust = -0.2) +
+  coord_flip() +
+  labs(title = paste0("Średnia liczba bramek strzelonych/straconych: ", sel_team),
+       subtitle = "Zielony = bramki strzelone\nCzerwony = bramki stracone",
+       x = "Przeciwnik", y = "") -> plot
+
+da_plot(plot)
+```
+
+Czarna kropka to różnica średnich - jak widać FC Barcelona z każdym rywalem jest *na plusie*.
+
+Wróćmy do naszych top 12 zawodników. Kto im asystuje? Możemy narysować to na grafie:
+
+```{r gole_11, fig.width=16, fig.height=16}
+passes_graph <- data %>%
+  filter(result == "Goal") %>%
+  filter(player %in% top_strikers) %>%
+  filter(!is.na(assist_player)) %>%
+  count(assist_player, player) %>%
+  select(from = assist_player, to = player, weight = n) %>%
+  graph_from_data_frame(directed = TRUE)
+
+
+plot(passes_graph,
+     vertex.color = if_else(V(passes_graph)$name %in% top_strikers, "blue", "lightblue"),
+     vertex.size = if_else(V(passes_graph)$name %in% top_strikers, 7, 3),
+     vertex.label.cex = 1,
+     vertex.label.color =  if_else(V(passes_graph)$name %in% top_strikers, "gray80", "gray20"),
+     edge.arrow.size = 0,
+     edge.arrow.width = E(passes_graph)$weight,
+     edge.width = E(passes_graph)$weight,
+     edge.curved = TRUE)
+```
+
+Nie widać tego dobrze na powyższym obrazku, ale w odpowiednim powiększeniu (kliknij na obrazek) widać na przykład pana Lucasa Mourę - jest pomiędzy dwoma różnymi grupami. Dlaczego? Ano, bo przeszedł z PSG do Tottenham i podaje już komuś innemu :)
+
+Przy użyciu pakietu networkD3 możemy przygotować z gotowego grafu (obiektu pakietu igraph) interaktywną wersję:
+
+```{r eval=FALSE}
+library(networkD3)
+
+passes_graph_d3 <- igraph_to_networkD3(passes_graph)
+
+forceNetwork(Links = passes_graph_d3$links, Nodes = passes_graph_d3$nodes,
+             Source = 'source', Target = 'target',
+             NodeID = 'name', Group = 'name',
+             linkWidth = passes_graph_d3$links$value,
+             fontSize = 11,
+             opacityNoHover = 0.6,
+             zoom = TRUE)
+```
+```{r echo=FALSE}
+library(networkD3)
+library(htmltools)
+
+
+passes_graph_d3 <- igraph_to_networkD3(passes_graph)
+
+browsable(
+  tagList(
+    tags$head(
+      tags$style('
+        body{background-color: #FFFFFF !important}
+        .nodetext{fill: #000000}
+        .legend text{fill: #FF0000}
+      ')
+    ),
+    # Create force directed network plot
+    forceNetwork(Links = passes_graph_d3$links, Nodes = passes_graph_d3$nodes,
+                 Source = 'source', Target = 'target',
+                 NodeID = 'name', Group = 'name',
+                 linkWidth = passes_graph_d3$links$value,
+                 fontSize = 11,
+                 opacityNoHover = 0.6,
+                 zoom = TRUE,
+                 height = 550,
+                 width = 650)
+  )
+) %>%
+  save_html("player_d3.html")
+```
+
+<center>
+<iframe src="player_d3.html" width="700" height="600" frameborder="0" ></iframe>
+</center>
+
+
+Prawda, że fajne?
+
+
+To początek prac, jakieś pomysły po pół dnia przyglądania się danym. Jeśli masz ochotę - możesz użyć przygotowanego wyżej kodu do zbudowania na przykład aplikacji w Shiny, w której będzie można wybrać drużyny albo zawodników i dla każdego takiego wyboru wygenerować odpowiednie wykresiki. A gdyby jeszcze zasilać dane (trzeba by scrapper napisać) każdego dnia byłoby prawie online. Dlaczego [understat.com](https://blog.prokulski.science/l.php?t=gole_w_ligach&u=https://understat.com/) tego nie ma?
+
+
+Miło będzie jeśli docenisz trud autora **[stawiając dużą kawę](https://blog.prokulski.science/l.php?t=gole_w_ligach&u=https://www.paypal.me/prokulski/10pln)**. Wpadnij też na **[Dane i Analizy na Facebooku](https://blog.prokulski.science/l.php?t=gole_w_ligach&u=http://facebook.com/DaneAnalizy/)** – tam więcej takich smaczków (szczególnie dla praktyków).

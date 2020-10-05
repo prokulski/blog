@@ -1,0 +1,510 @@
+---
+title: "Loty polskich premierów"
+author: "Łukasz Prokulski"
+date: "`r Sys.Date()`"
+output: 
+  html_document: 
+    fig_width: 10
+    fig_height: 8
+    fig_align: "center"
+    self_contained: no
+---
+
+Przełom lipca i sierpnia 2019 roku w polskiej polityce zdominowany był przez informacje o lotach - najpierw marszałka Sejmu, później kolejnych premierów.
+KPRM opublikował listę lotów kolejnych premierów z ostatnich kilku lat - zobaczmy czego nie zrobiły z nią media?
+
+```{r document_setup, echo=FALSE, message=FALSE, error=FALSE, warning=FALSE}
+library(tidyverse)
+library(knitr)
+library(kableExtra)
+
+# chunks options
+opts_chunk$set(message = FALSE, error = FALSE, warning = FALSE)
+options(knitr.table.format = "html") 
+
+source("/home/lemur/RProjects/!Rmarkdown_templates/da_plot.R")
+```
+
+Listy te (na dzień 18 sierpnia 2019 roku) dostępne były pod linkami:
+
+* [Donald Tusk](https://www.premier.gov.pl/files/files/pdt_-_loty.pdf)
+* [Ewa Kopacz](https://www.premier.gov.pl/static/files/files/loty_premier_ewy_kopacz.pdf)
+* [Beata Szydło](https://www.premier.gov.pl/static/files/files/loty_premier_beaty_szydlo.pdf)
+* [Mateusz Morawiecki](https://www.premier.gov.pl/static/files/files/pmm_-_loty.pdf)
+
+
+Nie znalazłem w żadnych mediach sensownego porównania pomiędzy premierami, więc porównam sobie sam. Przy okazji pokazując jak można w kilkadziesiąt minut przygotować rzetelny materiał.
+
+Jeśli chcesz zobaczyć wynik analizy - **[przejdź niżej](#analiza)**.
+
+### Przygotowanie danych
+
+W pierwszej kolejności pobieramy pliki PDF (z powyżej podanych adresów). Drugi element to *przepisanie* danych do analizowanej postaci. Do wczytania PDFów w R można wykorzystać pakiet **pdftools**.
+
+Pakiet ten wskazany plik *czyta* i zwraca jako listę z zawartością poszczególnych stron. Każdy z elementów tej listy to zwykły ciąg znaków. Na szczęście w tych dokumentach mamy do czynienia z jednakowymi tabelkami - możemy więc każdy z plików potraktować jednakowo. Poniższy kod zrobi za nas część pracy:
+
+```{r, eval=FALSE}
+library(tidyverse)
+library(pdftools)
+
+# lista plików PDF
+file_names <- c("dane/pbs.pdf", "dane/pdt.pdf", "dane/pek.pdf", "dane/pmm.pdf")
+
+# tutaj będziemy trzymać pełne dane
+complete = c()
+
+# dla każdego kolejnego pliku:
+for(file_name in file_names) {
+  # wczytujemy PDFa
+  pdf <- pdf_text(file_name)
+
+  # miejsce na linie z aktualnie przerabianego pliku
+  full <- c()
+
+  # dla każdej ze stron w pliku
+  for(i in 1:length(pdf)) {
+    # dzielimy stronę na linie
+    temp <- str_split(pdf[i], "\n")[[1]]
+    # dodajemy linie z bierzącej strony do linii z całego pliku
+    full <- c(full, temp)
+  }
+
+  # usuwamy puste linie
+  full <- full[nchar(full) != 0]
+
+  # więcej niż jedna spacja zostaje zamieniona na ;
+  full <- gsub(pattern = " +", ";", full)
+
+  # dodajemy kolumnę z nazwą pliku
+  full <- paste0(full, ";", file_name)
+
+  # dodajemy linie pliku do pełnych danych
+  complete <- c(complete, full)
+}
+
+# zapisujemy pełne dane do pliku CSV
+write_lines(complete, "dane/zapis.csv")
+```
+
+Teraz trochę ręcznej gimnastyki. Otwieramy zapisany plik CSV w Excelu i oglądamy każdy z wierszy. Docelowo chcemy uzyskać postać tabeli, gdzie każdy wiersz będzie zwierał trzy kolumny:
+
+* kolumna **data** - data w formacie dzień.miesiąc.rok (tak jak to zapisane w dokumentach)
+* kolumna **trasa** - trasę jaką przebył samolot w formacie lotnisko A-lotnisko B-lotnisko C; ważne żeby kolejne lotniska rozdzielone były myślnikami
+* kolumna **kto** - nazwę pliku z jakiego pochodzi informacja - to opisuje nam z którym premierem mamy do czynienia
+
+Wierszy było około tysiąca, ich poprawa zajęła może z 30 minut polegających głównie na złączeniu tekstów z dwóch (czasem więcej) kolumn do jednej komórki i ewentualnym przesunięciu wiersza w prawo. Niektóre wiersze trzeba było też usunąć (nagłówki tabel). Zapewne udałoby się to zrobić z poziomu R (i odpowiednich wyrażeń regularnych - tutaj sprawdzą się znakomicie), ale ręczny przegląd danych czasem też się przydaje.
+
+Kolejny krok to oczyszczenie danych. Lotniska nazwane są kodami, ale czasem to samo lotnisko występuje pod dwoma różnymi kodami. Maszyna tego nie zrozumie, trzeba jej pomóc.
+
+Przydatne będą dane o lokalizacji lotnisk - znajdziemy je na stronie [ourairports.com](http://ourairports.com/). Pobieramy plik CSV z listą lotnisk (np. dla całej Europy).
+
+Teraz czas na poprawę i oczyszczenie danych. Najpierw zobaczymy czego nam brakuje i co trzeba poprawić. Wczytujemy plik z listą lotów i rozbijamy kolumnę z trasą samolotu z danego dnia na poszczególne lotniska:
+
+```{r, eval=FALSE}
+library(tidyverse)
+
+# poprawnione ręcznie dane
+df <- read_csv2("dane/zapis.csv")
+
+# położenie lotnisk z http://ourairports.com/
+lotniska <- read_csv("dane/airports.csv")
+
+# przygotowanie danych
+loty <- df %>%
+  # rozdzielenie tracy na kolejne lotniska
+  mutate(trasa = str_split(trasa, "-")) %>%
+  unnest(trasa)
+```
+
+w tabeli `loty` mamy teraz kolumnę `trasa`, która zwiera wszystkie kody lotnisk. Jeśli zrobimy
+
+```{r, eval=FALSE}
+count(loty, trasa, sort = TRUE)
+```
+
+dostaniemy listę ułożoną wg popularności. Na początku będzie zapewne Warszawa, Gdańsk, Kraków. Warszawa może być jako **EPWA** lub **WAW**. W pliku z ourairports.com mamy tylko EPWA - stąd potrzebne korekty (najlepiej od razu na pliku *zapis.csv*). Jak znaleźć wszystkie lotniska, które trzeba poprawić? Ano próbujemy złączyć tabelkę o lotach z tabelką o lotniskach - to co nie uda się połączyć trzeba poprawić. Łączymy na przykład tak:
+
+```{r, eval=FALSE}
+loty %>%
+  distinct(trasa) %>%
+  left_join(lotniska %>% select(ident, name),
+            by = c("trasa" = "ident"))
+```
+
+To co w kolumnie `name` będzie mieć **NA** to braki. Dla tych wierszy szukamy kodu lotniska (jaki mamy) na stronie [ourairports.com](http://ourairports.com/) i przez *search & replace* zmieniamy w pliku  *zapis.csv* jeden kod na taki, który podaje ourairports.com. W większości przypadków powinno się udać.
+
+Po zmianach oczywiście zapisujemy *zapis.csv*.
+
+Z tak poprawionym plikiem robimy porządek w danych doprowadzając je do postaci, gdzie w jednym wierszu będziemy mieć informacje o konkretnym locie, w konkretnym dniu, konkretnego premiera, z jednego do drugiego lotniska:
+
+```{r}
+library(tidyverse)
+library(lubridate)
+
+# poprawnione ręcznie dane
+df <- read_csv2("dane/zapis.csv")
+
+# położenie lotnisk z http://ourairports.com/
+lotniska <- read_csv("dane/airports.csv")
+
+# przygotowanie danych
+loty <- df %>%
+  # rozdzielenie tracy na kolejne lotniska
+  mutate(trasa = str_split(trasa, "-")) %>%
+  unnest(trasa) %>%
+  select(data, kto, lotnisko_z=trasa) %>%
+  # przesuwamy o jeden lotniska
+  group_by(kto, data) %>%
+  mutate(lotnisko_do = lead(lotnisko_z)) %>%
+  filter(!is.na(lotnisko_do)) %>%
+  filter(lotnisko_do != lotnisko_z) %>%
+  ungroup() %>%
+  # dodajemy położenie dla lotniska źródłowego i docelowego
+  left_join(lotniska %>%
+              select(ident, lat_z=latitude_deg, long_z=longitude_deg, miasto_z=municipality),
+            by = c("lotnisko_z" = "ident")) %>%
+  left_join(lotniska %>%
+              select(ident, lat_do=latitude_deg, long_do=longitude_deg, miasto_do=municipality),
+            by = c("lotnisko_do" = "ident")) %>%
+  # wybieramy potrzebne kolumny
+  select(kto, data, lotnisko_z, lotnisko_do, lat_z, long_z, miasto_z, lat_do, long_do, miasto_do) %>%
+  # usuwamy niedopasowane lotniska - uwaga: tracimy część danych!
+  na.omit() %>%
+  # budujemy trasę przelotu
+  mutate(lot = paste0(miasto_z, " - ", miasto_do)) %>%
+  # poprawiamy format daty
+  rowwise() %>%
+  mutate(data2 = str_match(data, "(\\d{2}\\.\\d{2}\\.\\d{4})")[[1,1]] %>% dmy()) %>%
+  ungroup() %>%
+  mutate(kto = toupper(kto))
+```
+
+Przykładowe wiersze wyglądają następująco:
+
+```{r echo=FALSE}
+loty %>% 
+  sample_n(10) %>% 
+  kable() %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed", "responsive")) %>%
+  scroll_box(width = "100%")
+```
+
+
+Dane są przygotowane, można przejść do opracowania materiału tak, jak nie zrobiły tego media.
+
+### Analiza
+
+Na przykład - najpopularniejsze trasy (3/4 wszystkich dla każdego z premierów):
+
+```{r eval=FALSE}
+loty %>%
+  count(kto, lot) %>%
+  group_by(kto) %>%
+  mutate(total = sum(n)) %>%
+  ungroup() %>%
+  mutate(procent_lotow = 100*n/total) %>%
+  arrange(kto, desc(procent_lotow)) %>%
+  group_by(kto) %>%
+  mutate(total = cumsum(procent_lotow)) %>%
+  filter(total <= 75) %>%
+  ungroup()
+```
+
+**Premier Donald Tusk:**
+
+```{r echo=FALSE}
+loty %>%
+  filter(kto == "PDT") %>%
+  count(kto, lot) %>%
+  mutate(total = sum(n)) %>%
+  mutate(procent_lotow = 100*n/total) %>%
+  arrange(desc(procent_lotow)) %>%
+  mutate(total = cumsum(procent_lotow)) %>%
+  filter(total <= 75) %>%
+  mutate(procent_lotow = round(procent_lotow, 2),
+         total = round(total, 2)) %>%
+  select(lot, n, procent_lotow, total) %>%
+  set_names(c("Trasa lotu", "Liczba lotów", "% lotów premiera", "% skumulowany")) %>%
+  kable() %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed", "responsive"))
+```
+
+**Premier Ewa Kopacz:**
+
+```{r echo=FALSE}
+loty %>%
+  filter(kto == "PEK") %>%
+  count(kto, lot) %>%
+  mutate(total = sum(n)) %>%
+  mutate(procent_lotow = 100*n/total) %>%
+  arrange(desc(procent_lotow)) %>%
+  mutate(total = cumsum(procent_lotow)) %>%
+  filter(total <= 75) %>%
+  mutate(procent_lotow = round(procent_lotow, 2),
+         total = round(total, 2)) %>%
+  select(lot, n, procent_lotow, total) %>%
+  set_names(c("Trasa lotu", "Liczba lotów", "% lotów premiera", "% skumulowany")) %>%
+  kable() %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed", "responsive"))
+```
+
+
+**Premier Beata Szydło:**
+
+```{r echo=FALSE}
+loty %>%
+  filter(kto == "PBS") %>%
+  count(kto, lot) %>%
+  mutate(total = sum(n)) %>%
+  mutate(procent_lotow = 100*n/total) %>%
+  arrange(desc(procent_lotow)) %>%
+  mutate(total = cumsum(procent_lotow)) %>%
+  filter(total <= 75) %>%
+  mutate(procent_lotow = round(procent_lotow, 2),
+         total = round(total, 2)) %>%
+  select(lot, n, procent_lotow, total) %>%
+  set_names(c("Trasa lotu", "Liczba lotów", "% lotów premiera", "% skumulowany")) %>%
+  kable() %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed", "responsive"))
+```
+
+
+**Premier Mateusz Morawiecki:**
+
+```{r echo=FALSE}
+loty %>%
+  filter(kto == "PMM") %>%
+  count(kto, lot) %>%
+  mutate(total = sum(n)) %>%
+  mutate(procent_lotow = 100*n/total) %>%
+  arrange(desc(procent_lotow)) %>%
+  mutate(total = cumsum(procent_lotow)) %>%
+  filter(total <= 75) %>%
+  mutate(procent_lotow = round(procent_lotow, 2),
+         total = round(total, 2)) %>%
+  select(lot, n, procent_lotow, total) %>%
+  set_names(c("Trasa lotu", "Liczba lotów", "% lotów premiera", "% skumulowany")) %>%
+  kable() %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed", "responsive"))
+```
+
+
+
+
+Albo - co ciekawsze - narysujmy **mapkę z najczęściej pokonywanymi połączeniami przez każdego z premierów w Polsce**:
+
+```{r eval=FALSE}
+# lista polskich lotnisk
+lotniska_pl <- lotniska %>% filter(iso_country == "PL") %>% pull(ident)
+
+loty %>%
+  # tylko polskie lotniska
+  filter(lotnisko_z %in% lotniska_pl & lotnisko_do %in% lotniska_pl) %>%
+  # ile razy premier pokonywał daną trasę?
+  count(kto, lat_z, long_z, miasto_z, lat_do, long_do, miasto_do) %>%
+  # jaka to część jej/jego lotów
+  group_by(kto) %>%
+  mutate(n = n/sum(n)) %>%
+  ungroup() %>%
+  # rysujemy:
+  ggplot() +
+  # kontury Polski
+  geom_polygon(data = map_data("world") %>%
+                 filter(region == "Poland"),
+               aes(long, lat, group=group),
+               color = "gray30", fill = "gray90") +
+  # połączenia lotnicze
+  geom_segment(aes(x = long_z, xend = long_do,
+                   y = lat_z, yend = lat_do,
+                   size = n),
+               alpha = 0.25, color = "red",
+               show.legend = FALSE) +
+  # punkty pokazujące położenie lotnisk
+  geom_point(data = lotniska %>% filter(iso_country == "PL") %>%
+               filter(ident %in% loty$lotnisko_z | ident %in% loty$lotnisko_do),
+             aes(longitude_deg, latitude_deg),
+             size = 1) +
+  # nazwy miast, w których są lotniska
+  geom_text(data = lotniska %>% filter(iso_country == "PL") %>%
+              filter(ident %in% loty$lotnisko_z | ident %in% loty$lotnisko_do),
+            aes(longitude_deg, latitude_deg, label = municipality),
+            size = 2, hjust = -0.1, vjust = 0) +
+  # ograniczamy zakres wykresu
+  xlim(13, 25) +
+  ylim(49, 55) +
+  coord_map() +
+  scale_size_continuous(range=c(0.5, 3)) +
+  # każdy premier na swojej mapce
+  facet_wrap(~kto) +
+  # kosmetyka
+  theme_minimal() +
+  theme(axis.text = element_blank(), panel.grid = element_blank()) +
+  labs(x = "", y = "")
+```
+```{r loty_premierow_01, echo=FALSE}
+# lista polskich lotnisk
+lotniska_pl <- lotniska %>% filter(iso_country == "PL") %>% pull(ident)
+
+plot <- loty %>%
+  # tylko polskie lotniska
+  filter(lotnisko_z %in% lotniska_pl & lotnisko_do %in% lotniska_pl) %>%
+  # ile razy premier pokonywał daną trasę?
+  count(kto, lat_z, long_z, miasto_z, lat_do, long_do, miasto_do) %>%
+  # jaka to część jej/jego lotów
+  group_by(kto) %>%
+  mutate(n = n/sum(n)) %>%
+  ungroup() %>%
+  # rysujemy:
+  ggplot() +
+  # kontury Polski
+  geom_polygon(data = map_data("world") %>%
+                 filter(region == "Poland"),
+               aes(long, lat, group=group),
+               color = "gray30", fill = "gray90") +
+  # połączenia lotnicze
+  geom_segment(aes(x = long_z, xend = long_do,
+                   y = lat_z, yend = lat_do,
+                   size = n),
+               alpha = 0.25, color = "red",
+               show.legend = FALSE) +
+  # punkty pokazujące położenie lotnisk
+  geom_point(data = lotniska %>% filter(iso_country == "PL") %>%
+               filter(ident %in% loty$lotnisko_z | ident %in% loty$lotnisko_do),
+             aes(longitude_deg, latitude_deg),
+             size = 1) +
+  # nazwy miast, w których są lotniska
+  geom_text(data = lotniska %>% filter(iso_country == "PL") %>%
+              filter(ident %in% loty$lotnisko_z | ident %in% loty$lotnisko_do),
+            aes(longitude_deg, latitude_deg, label = municipality),
+            size = 2, hjust = -0.1, vjust = 0) +
+  # ograniczamy zakres wykresu
+  xlim(13, 25) +
+  ylim(49, 55) +
+  coord_quickmap() +
+  scale_size_continuous(range=c(0.5, 3)) +
+  # każdy premier na swojej mapce
+  facet_wrap(~kto) +
+  # kosmetyka
+  theme_minimal() +
+  theme(axis.text = element_blank(), panel.grid = element_blank()) +
+  labs(title = "Połączenia lotnicze premierów",
+       subtitle = "Na podstawie wykazów opublikowanych przez KPRM",
+       x = "", y = "")
+
+da_plot(plot, blank_x = TRUE, blank_y = TRUE)
+```
+
+
+Możemy też sprawdzić **jak latali po Europie**:
+
+```{r eval=FALSE}
+# gdzie latają po Europie?
+loty %>%
+  count(kto, lat_z, long_z, miasto_z, lat_do, long_do, miasto_do) %>%
+  mutate(kto = toupper(kto)) %>%
+  group_by(kto) %>%
+  mutate(n = n/sum(n)) %>%
+  ungroup() %>%
+  ggplot() +
+  borders("world", xlim = c(-10, 25), ylim = c(39, 70), fill = "gray90") +
+  geom_segment(aes(x = long_z, xend = long_do,
+                   y = lat_z, yend = lat_do,
+                   size = n),
+               alpha = 0.25, color = "red",
+               show.legend = FALSE) +
+  coord_map() +
+  scale_size_continuous(range=c(0.5, 3)) +
+  facet_wrap(~kto) +
+  theme_minimal() +
+  theme(axis.text = element_blank(),
+        panel.grid = element_blank()) +
+  labs(x = "", y = "")
+```
+```{r loty_premierow_02, echo=FALSE}
+# gdzie latają po Europie?
+plot <- loty %>%
+  count(kto, lat_z, long_z, miasto_z, lat_do, long_do, miasto_do) %>%
+  mutate(kto = toupper(kto)) %>%
+  group_by(kto) %>%
+  mutate(n = n/sum(n)) %>%
+  ungroup() %>%
+  ggplot() +
+  borders("world", xlim = c(-10, 25), ylim = c(39, 70), fill = "gray90") +
+  geom_segment(aes(x = long_z, xend = long_do,
+                   y = lat_z, yend = lat_do,
+                   size = n),
+               alpha = 0.25, color = "red",
+               show.legend = FALSE) +
+  coord_quickmap() +
+  scale_size_continuous(range=c(0.5, 3)) +
+  facet_wrap(~kto) +
+  theme_minimal() +
+  theme(axis.text = element_blank(),
+        panel.grid = element_blank()) +
+  labs(title = "Połączenia lotnicze premierów",
+       subtitle = "Na podstawie wykazów opublikowanych przez KPRM",
+       x = "", y = "")
+
+
+da_plot(plot, blank_x = TRUE, blank_y = TRUE)
+```
+
+
+oraz **liczbę lotów w kolejnych miesiącach**:
+
+```{r eval=FALSE}
+loty %>%
+  mutate(data2 = floor_date(data2, "month")) %>%
+  count(kto, data2) %>%
+  ggplot() +
+  geom_col(aes(data2, n, fill = kto), show.legend = FALSE) +
+  geom_smooth(aes(data2, n, color = kto), show.legend = FALSE) +
+  facet_wrap(~kto, scales = "free_x") +
+  scale_x_date(date_labels = "%m/%Y") +
+  theme_minimal() +
+  labs(x = "", y = "Liczba lotów w miesiącu")
+```
+```{r loty_premierow_03, echo=FALSE}
+loty %>%
+  mutate(data2 = floor_date(data2, "month")) %>%
+  count(kto, data2) %>%
+  ggplot() +
+  geom_col(aes(data2, n, fill = kto), show.legend = FALSE) +
+  geom_smooth(aes(data2, n, color = kto), show.legend = FALSE) +
+  facet_wrap(~kto, scales = "free_x") +
+  scale_x_date(date_labels = "%m/%Y") +
+  theme_minimal() +
+  labs(title = "Połączenia lotnicze premierów",
+       subtitle = "Na podstawie wykazów opublikowanych przez KPRM",
+       x = "", y = "Liczba lotów w miesiącu")
+```
+
+
+Kto lata najczęściej?
+
+```{r}
+loty %>%
+  group_by(kto) %>%
+  summarise(mind = min(data2, na.rm = T),
+            maxd = max(data2, na.rm = T),
+            n = n()) %>%
+  ungroup() %>%
+  mutate(diff_date = as.numeric(maxd - mind)) %>%
+  mutate(day_per_flight = round(diff_date/n, 2)) %>%
+  select(-mind, -maxd) %>%
+  set_names(c("Premier", "Liczba lotów", "Liczba dni urzędowania", "Częstotliwość lotów")) %>%
+  kable() %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed", "responsive"))
+```
+
+Wnioski wyciągajcie sami (są mocno zależne od upodobań politycznych). **Widać kilka rzeczy:**
+
+* **Beata Szydło** często latała na trasie Warszawa-Kraków oraz Warszawa-Katowice (lub odwrotnie) - to 54% jej lotów
+* **Donald Tusk** często latał na trasie Warszawa-Gdańsk i z powrotem - to 50% jego lotów
+* **Ewa Kopacz** latała głównie do Brukseli, latała też najrzadziej - średnio o 5 dni
+* **Mateusz Morawiecki** lata dużo, więcej niż inni - ot średnio co niecałe dwa dni
+
+
+Całość opracowania danych zajęła mi może z pół dnia. Dlaczego media tego nie zrobiły?
+
+**Cenisz rzetelne dziennikarstwo?** To wymagaj go od mediów, za które płacisz. Albo **[płać](https://www.paypal.me/prokulski/10pln)** tym, których cenisz :-)

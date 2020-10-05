@@ -1,0 +1,93 @@
+---
+title: "Które API szybsze - w Pythonie czy w R?"
+author: "Łukasz Prokulski"
+date: "`r Sys.Date()`"
+output: 
+  html_document: 
+    fig_width: 10
+    fig_height: 8
+    fig_align: "center"
+    self_contained: no
+---
+
+```{r document_setup, echo=FALSE, message=FALSE, error=FALSE, warning=FALSE}
+library(tidyverse)
+library(knitr)
+library(kableExtra)
+
+# chunks options
+opts_chunk$set(message = FALSE, error = FALSE, warning = FALSE)
+options(knitr.table.format = "html") 
+
+source("/home/lemur/RProjects/!Rmarkdown_templates/da_plot.R")
+```
+
+
+
+Repozytorium z kodem https://github.com/prokulski/api_performance
+
+```{r}
+library(tidyverse)
+
+df <- read_csv("wyniki.csv") %>%
+  mutate(query_time = elapsed_ms/iterations)
+```
+
+
+
+```{r}
+glimpse(df)
+```
+
+
+```{r}
+count(df, api, iterations) %>% pivot_wider(names_from=api, values_from=n)
+```
+
+```{r}
+df %>%
+  group_by(api, method) %>%
+  summarise(mean_query = mean(query_time)) %>%
+  ungroup() %>%
+  pivot_wider(names_from = api, values_from = mean_query) %>%
+  mutate(F_P = round(Plumber/Flask, 2),
+         F_R = round(RestRserve/Flask, 2),
+         R_P = round(RestRserve/Plumber, 2)) %>%
+  mutate(Plumber = round(Plumber, 1),
+         Flask = round(Flask, 1),
+         RestRserve = round(RestRserve, 1)) %>%
+  set_names(c("method", "Flask [ms]", "Plumber [ms]", "RestRserve [ms]",
+              "Flask/Plumber", "Flask/RestRserve", "RestRserve/Plumber"))
+```
+
+
+```{r}
+df %>%
+    #filter(api != "RestRserve") %>%
+    ggplot() +
+    geom_boxplot(aes(method, query_time, color = api))
+```
+
+
+```{r}
+ggplot(df) +
+  geom_point(aes(iterations, query_time)) +
+  geom_smooth(aes(iterations, query_time)) +
+  facet_grid(api~method, scales="free")
+```
+
+
+```{r}
+ggplot(df) +
+  geom_point(aes(iterations, elapsed_ms)) +
+  geom_smooth(aes(iterations, elapsed_ms)) +
+  facet_grid(api~method, scales="free")
+```
+
+```{r}
+df %>%
+    filter(api != "RestRserve") %>%
+    ggplot() +
+    geom_boxplot(aes(as.factor(iterations), query_time, group=iterations)) +
+    facet_grid(api~method, scales="free")
+```

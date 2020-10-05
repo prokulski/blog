@@ -1,0 +1,409 @@
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml">
+
+<head>
+
+<meta charset="utf-8" />
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+<meta name="generator" content="pandoc" />
+
+
+<meta name="author" content="Łukasz Prokulski" />
+
+<meta name="date" content="2018-09-28" />
+
+<title>Kategoryzacja użytkowników strony</title>
+
+<script src="blog_post_files/jquery-1.11.3/jquery.min.js"></script>
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<link href="blog_post_files/bootstrap-3.3.5/css/bootstrap.min.css" rel="stylesheet" />
+<script src="blog_post_files/bootstrap-3.3.5/js/bootstrap.min.js"></script>
+<script src="blog_post_files/bootstrap-3.3.5/shim/html5shiv.min.js"></script>
+<script src="blog_post_files/bootstrap-3.3.5/shim/respond.min.js"></script>
+<script src="blog_post_files/navigation-1.1/tabsets.js"></script>
+<link href="blog_post_files/highlightjs-9.12.0/default.css" rel="stylesheet" />
+<script src="blog_post_files/highlightjs-9.12.0/highlight.js"></script>
+
+<style type="text/css">code{white-space: pre;}</style>
+<style type="text/css">
+  pre:not([class]) {
+    background-color: white;
+  }
+</style>
+<script type="text/javascript">
+if (window.hljs) {
+  hljs.configure({languages: []});
+  hljs.initHighlightingOnLoad();
+  if (document.readyState && document.readyState === "complete") {
+    window.setTimeout(function() { hljs.initHighlighting(); }, 0);
+  }
+}
+</script>
+
+
+
+<style type="text/css">
+h1 {
+  font-size: 34px;
+}
+h1.title {
+  font-size: 38px;
+}
+h2 {
+  font-size: 30px;
+}
+h3 {
+  font-size: 24px;
+}
+h4 {
+  font-size: 18px;
+}
+h5 {
+  font-size: 16px;
+}
+h6 {
+  font-size: 12px;
+}
+.table th:not([align]) {
+  text-align: left;
+}
+</style>
+
+
+</head>
+
+<body>
+
+<style type = "text/css">
+.main-container {
+  max-width: 940px;
+  margin-left: auto;
+  margin-right: auto;
+}
+code {
+  color: inherit;
+  background-color: rgba(0, 0, 0, 0.04);
+}
+img {
+  max-width:100%;
+  height: auto;
+}
+.tabbed-pane {
+  padding-top: 12px;
+}
+.html-widget {
+  margin-bottom: 20px;
+}
+button.code-folding-btn:focus {
+  outline: none;
+}
+</style>
+
+
+
+<div class="container-fluid main-container">
+
+<!-- tabsets -->
+<script>
+$(document).ready(function () {
+  window.buildTabsets("TOC");
+});
+</script>
+
+<!-- code folding -->
+
+
+
+
+
+
+<div class="fluid-row" id="header">
+
+
+
+<h1 class="title toc-ignore">Kategoryzacja użytkowników strony</h1>
+<h4 class="author"><em>Łukasz Prokulski</em></h4>
+<h4 class="date"><em>2018-09-28</em></h4>
+
+</div>
+
+
+<p>Jak podzielić użytkowników strony internetowej na grupy? Korzystając tylko ze statystyk ruchu.</p>
+<p><a href="/index.php/2018/09/26/google-analytics-w-r/">W poprzedniej części</a> dowiedzieliśmy się jak skorzystać z danych z Google Analytics w R. Pod koniec wpisu podałem linki do postów, które opisują jak dodać unikalne ID użytkownika wchodzącego na stronę. Dzisiaj zajmiemy się próbą przypisania każdego z użytkowników do jakiejś grupy.</p>
+<p><strong>Kategoryzacja klientów to jedno z podstawowych działań w biznesie.</strong> Dlaczego? Możemy zechcieć coś innego pokazać na naszej stronie różnym grupom klientów. Albo - jeśli mamy na przykład maile (z zapisów na newsletter) wysłać inne treści. Znajomość klientów i ich zachowań to podstawa.</p>
+<p>Spróbujemy na podstawie posiadanych danych określić grupy klientów. Tymi danymi mogą być odwiedziny na stronie WWW albo wyświetlenie reklamy w aplikacji w telefonie, zakupy w rzeczywistym sklepie, udział w jakimś wydarzeniu (na przykład pójście do kina). Zwróćcie uwagę, że w każdym z wymienionych przypadków wiemy zazwyczaj nieco więcej:</p>
+<ul>
+<li>użytkownik wchodzi na stronę: wiemy dodatkowo na ile i jakie podstrony wszedł (jaką treść czytał), ile czasu spędził na stronie (nawet na każdej podstronie), skąd przyszedł (i na przykład z jakiej reklamy), jakiej używa przeglądarki, z jakiej sieci (IP, geolokalizacja) przychodzi</li>
+<li>wyświetlenie reklamy - większość z powyższych plus w jakiej na przykład aplikacji wyświetlił reklamę (czy to aplikacja typu gierka dla dzieci czy lista zakupów), być może jego rzeczywistą lokalizację geograficzną w momencie wyświetlenia reklamy</li>
+<li>wizyta w kinie - jaki to film, które to kino, ile biletów kupił, w jaki sposób (w kasie czy przez internet, jak zapłacił)</li>
+<li>zakupy - co kupił, ile zapłacił</li>
+</ul>
+<p>Oczywiście wszystko to możemy zebrać jeśli zbieramy unikalne identyfikatory użytkowników. W internecie jest łatwiej :)</p>
+<p>W naszym przypadku ograniczymy się do minimum, do najbardziej szczątkowych danych. Jedyne informacje jakie mamy to identyfikacja, że konkretny użytkownik (konkretne ID) wszedł na stronę w konkretnym momencie. Nic więcej. Za dane posłużą nam dane treningowe z konkursu Kaggle <a href="https://www.kaggle.com/c/ga-customer-revenue-prediction">Google Analytics Customer Revenue Prediction</a> - możecie ściągnąć plik <code>train.csv</code>.</p>
+<p>W pierwszym kroku wczytamy nasze dane (tylko wybrane kolumny) i poprawimy zapis daty na bardziej użyteczny.</p>
+<pre class="r"><code>library(data.table) # dla fread()
+library(tidyverse)
+library(lubridate)
+
+df &lt;- fread(&quot;data/train.csv&quot;, select = c(4,12), col.names = c(&quot;user_id&quot;, &quot;timestamp&quot;))
+
+df &lt;- df %&gt;%
+  mutate(timestamp = as_datetime(timestamp),
+         date = as_date(timestamp),
+         wday = wday(timestamp, week_start = 1, label = TRUE, abbr = FALSE, locale = &quot;pl_PL.utf8&quot;),
+         hour = hour(timestamp))</code></pre>
+<p>Dane wczytujemy z użyciem <code>fread()</code> z pakietu <code>data.table</code> - jest piekielnie szybka. Wybieramy tylko dwie kolumny: <em>user_id</em> będącą numerkiem użytkownika oraz <em>timestamp</em> - będącą momentem rozpoczęcia wizyty na stronie. W danych jest więcej informacji, ale dla uproszczenia (i pokazania że nawet z taką niewielką ilością danych można coś zdziałać) wykorzystamy tylko te dwie kolumny.</p>
+<p>Podczas przygotowania modelu najlepiej zacząć od przeglądu danych. Pierwsze kroki to sprawdzenie czy mamy jakieś braki, czy są jakieś wartości odstające itd. W tym przypadku wszystkie dane są kompletne, nie musimy się tym zajmować (możecie zaufać mi na słowo).</p>
+<p>Zobaczmy jak wyglądała liczba wizyt w czasie:</p>
+<pre class="r"><code>plot &lt;- df %&gt;%
+  count(date) %&gt;%
+  ggplot(aes(date, n)) +
+  geom_area(fill = &quot;lightblue&quot;, alpha = 0.5) +
+  geom_line(color = &quot;blue&quot;, size = 0.2) +
+  labs(title = &quot;Dzienna liczba wizyt&quot;,
+       x = &quot;&quot;, y = &quot;Łączna liczba wizyt&quot;)
+  
+da_plot(plot)</code></pre>
+<p><img src="blog_post_files/figure-html/ga2_01-1.png" width="768" /></p>
+<p>Mamy sporą górkę jesienią 2016 roku - spodziewam się, że była wtedy jakaś kampania reklamowa, stąd zwiększony ruch.</p>
+<p>Widać też regularne dołki w równych odstępach czasu - to zapewne weekendy. Możemy to sprawdzić rysując heatmapę dzień tygodnia - godzina:</p>
+<pre class="r"><code>plot &lt;- df %&gt;%
+  count(wday, hour) %&gt;%
+  ggplot() +
+  geom_tile(aes(wday, hour, fill = n), color = &quot;gray50&quot;) +
+  scale_y_reverse() +
+  scale_fill_distiller(palette = &quot;Greens&quot;, direction = 1) +
+  labs(title = &quot;Łączna liczba wizyt na stronie\nw zależności od dnia tygodnia i godziny&quot;,
+       x = &quot;&quot;, y = &quot;Godzina&quot;, fill = &quot;Łączna liczba\nwizyt na godzinę&quot;)
+
+da_plot(plot)</code></pre>
+<p><img src="blog_post_files/figure-html/ga2_02-1.png" width="768" /></p>
+<p>I przypuszczenia się potwierdzają: większy ruch jest w godzinach popołudniowych w dni robocze.</p>
+<p>Policzmy teraz ile razy dany użytkownik (czyli unikalny <em>user_id</em>) odwiedzał stronę:</p>
+<pre class="r"><code>plot &lt;- df %&gt;%
+  count(user_id) %&gt;%
+  ggplot() +
+  geom_density(aes(n), fill = &quot;lightblue&quot;, color = &quot;blue&quot;, size = 0.2) +
+  scale_x_log10() +
+  labs(title = &quot;Rozkład liczy wizyt użytkownika na stronie&quot;,
+       x = &quot;Liczba wizyt użytkownika&quot;, y = &quot;Gęstość prawdopodobieństwa&quot;)
+
+da_plot(plot)</code></pre>
+<p><img src="blog_post_files/figure-html/ga2_03-1.png" width="768" /></p>
+<p>Wielka szpila dla pojedynczych odwiedzin, a później coraz niższe górki dla kolejnych. Powyżej 10 razy prawie nikt nie odwiedzał strony. Skorzystamy z tej informacji.</p>
+<p>Na początek przygotujmy trzy funkcje, które ułatwią nam pracę.</p>
+<p>Pierwsza z nich z całości danych wybierze tylko ich fragment. W przemysłowych warunkach może okazać się zbędna. Tutaj wybieramy tylko użytkowników, którzy odwiedzili stronę co najmniej dwa razy.</p>
+<pre class="r"><code>select_data &lt;- function(source_df) {
+
+  # znajdź ID użytkowników z co najmniej 2 wizytami
+  users_more_than_once &lt;- count(source_df, user_id) %&gt;% filter(n &gt;= 2) %&gt;% pull(user_id)
+
+  # wybierz tylko tych użytkowników z całości danych
+  df_more_than_once &lt;- filter(source_df, user_id %in% users_more_than_once)
+
+  return(df_more_than_once)
+}</code></pre>
+<p>Większość modeli lepiej działa jeśli dane liczbowe będące cechami do uczenia modelu są przeskalowane do zakresu &lt;0;1&gt;. Zatem przygotujmy odpowiednią funkcyjkę skalującą:</p>
+<pre class="r"><code>scale_num &lt;- function(x) {
+  return( (x - min(x)) / (max(x) - min(x)) )
+}</code></pre>
+<p>I na koniec funkcja najważniejsza: przygotowanie cech, których użyje model. Ten kod robi kilka rzeczy:</p>
+<ul>
+<li>liczy ile razy użytkownik odwiedził stronę (w całym badanym czasie) - ta informacja trafia do zmiennej <em>n_times</em></li>
+<li>rozdziela datę na kolejne dni tygodnia - dodając zmienną <em>dw</em> z wartością <em>w1</em> do <em>w7</em>; literka <em>w</em> upraszcza późniejsze problemy z nazwami kolumn</li>
+<li>w zmiennej <em>w</em> określa czy dana data to sobota lub niedziela (1 jeśli tak, 0 jeśli nie); przy podejściu bardziej kompleksowym warto uwzględnić też inne dni wolne od pracy (święta, w sklepach stacjonarnych wolne niedziele niehandlowe)</li>
+<li>następnie funkcja sumuje liczbę wystąpień poszczególnych zmiennych dla każdego użytkownika w kolejnych godzinach</li>
+<li>na koniec rozsmarowuje długą tabelę na tabelę szeroką, gdzie w kolejnych wierszach mamy informacje dla kolejnych numerów <em>user_id</em> odwiedzających stronę w kolejnych godzinach (w najbardziej skrajnym przypadku może być więc 24 wierszy dla jednego <em>user_id</em>), a w kolumnach: liczbę wizyt w danym dniu tygodnia i w weekendy oraz łączną liczbę wizyt użytkownika w całym badanym czasie</li>
+<li>na koniec skalujemy kolumny z łączną liczbą odwiedzin i godziną konkretnej wizyty do przedziału &lt;0;1&gt;</li>
+</ul>
+<pre class="r"><code>prepare_data &lt;- function(source_df) {
+  source_df %&gt;%
+    # łączna liczba wizyt na użytkownika
+    group_by(user_id) %&gt;%
+    mutate(n_times = n()) %&gt;%
+    ungroup() %&gt;%
+    # cechy oparte na dacie
+    mutate(dw = sprintf(&quot;w%d&quot;, wday(timestamp, week_start = 1)),       # dzień tygodnia
+           h = hour(timestamp),                                        # godzina 
+           w = 1*(wday(timestamp, week_start = 1) %in% c(6, 7))) %&gt;%   # czy weekend?
+    # zliczamy liczbę wizyt w danym dniu tygodnia i o określonej godzinie dla każdego z użytkowników
+    count(user_id, n_times, w, h, dw) %&gt;%
+    # przechodzimy na szeroką tabelę - takie nieco one-hot-encoder dla dni tygodnia i weekendów
+    spread(dw, n, fill = 0) %&gt;%
+    # skalowanie godzin i łącznej liczby odwiedzin
+    mutate_at(.vars = c(&quot;h&quot;, &quot;n_times&quot;), 
+              .funs = scale_num)
+}</code></pre>
+<p>Odpalmy zatem naszą maszynę. Najpierw wybieramy interesujące nas dane z całości - czyli tych użytkowników, którzy byli na stronie co najmniej dwa razy (zgodnie z <code>select_data()</code>):</p>
+<pre class="r"><code>df_train &lt;- select_data(df)</code></pre>
+<p>Ostatecznie będziemy działać na 31% danych - bo tyle mamy użytkowników powracających. Zobaczmy jak wyglądała liczba wizyt dla wszystkich użytkowników (czerwone) i dla tych wybranych w poszczególnych dniach (zielone):</p>
+<pre class="r"><code>plot &lt;- ggplot() +
+  geom_line(data = df_train %&gt;% count(date), aes(date, n), color = &quot;green&quot;) +
+  geom_line(data = df %&gt;% count(date), aes(date, n), color = &quot;red&quot;) +
+  labs(x = &quot;&quot;, y = &quot;Liczba wizyt danego dnia&quot;)
+
+da_plot(plot)</code></pre>
+<p><img src="blog_post_files/figure-html/ga2_04-1.png" width="768" /></p>
+<p>Czerwone to wszyscy i tutaj jesienna górka z 2016 roku pozostała. Na zielonym jest mniej więcej stabilnie. Wniosek z kampanią reklamową wydaje się być słuszny. Możemy szybko sprawdzić udział powracających do wszystkich:</p>
+<pre class="r"><code>plot &lt;- left_join(df %&gt;% count(date) %&gt;% set_names(c(&quot;date&quot;, &quot;n_all&quot;)),
+          df_train %&gt;% count(date) %&gt;% set_names(c(&quot;date&quot;, &quot;n_train&quot;)),
+          by = &quot;date&quot;) %&gt;%
+  mutate(ratio = 100*n_train/n_all) %&gt;%
+  ggplot() +
+  geom_line(aes(date, ratio)) +
+  labs(title = &quot;Udział procentowy użytkowników powracających&quot;,
+       x = &quot;&quot;, y = &quot;% użytkowników powracających&quot;)
+
+da_plot(plot)</code></pre>
+<p><img src="blog_post_files/figure-html/ga2_05-1.png" width="768" /></p>
+<p>Uwaga - powyższy wykres jest fałszywy. Dlaczego? Bo jako powracającego bierzemy każdego użytkownika, który w całym badanym okresie zrobił co najmniej dwie wizyty. Czyli tego, który odwiedził stronę we wrześniu 2016 i w lipcu 2017. Dla ostatniego dnia będzie już powracającym, ale dla np. stycznia 2017 jeszcze nie (bo nie zrobił swojej kolejnej wizyty). Ale to tylko uproszczenie, które znowu pokazuje nam, że jesienią 2017 mamy więcej <em>jednorazowych strzałów</em> (mniejszy udział powracających), zatem po raz kolejny mamy (prawdopodobne) potwierdzenie kampanii reklamowej.</p>
+<p>W kolejny kroku przygotowujemy nasze dane na potrzeby modelu:</p>
+<pre class="r"><code>wide_mat &lt;- prepare_data(df_train)</code></pre>
+<p>i wybieramy same unikalne wartości i tylko cechy (bez numerów <em>user_id</em>):</p>
+<pre class="r"><code>wide_mat_dist &lt;- wide_mat %&gt;%
+  select(-user_id) %&gt;%
+  distinct()</code></pre>
+<p>Dlaczego tylko unikalne? Dlatego, żeby późniejsze przypisanie klas i sam model nie spowodowało, że takiej samej kombinacji przypisujemy inną klasę. Jest to trochę dmuchanie na zimne i jednocześnie zmniejsza nam wielkość danych - mamy 15597 unikalnych wierszy spośród 241672 (czyli 15.5 razy mniej) - co przyspiesza obliczenia.</p>
+<p>Taką tablicę możemy podzielić na przykład na trzy grupy korzystając z algorytmu k-means.</p>
+<pre class="r"><code># kmeans do określenia kategorii usera
+km &lt;- kmeans(wide_mat_dist, centers = 3)
+
+# przypisujemy klasy do danych treningowych
+wide_mat_dist$cluster &lt;- as.factor(km$cluster)</code></pre>
+<p><strong>Czy k-means to najlepszy sposób?</strong> To jeden z elementów przygotowania modelu, zatem warto poświęcić mu więcej czasu. Jeśli mamy jakiekolwiek cechy, które pozwolą przypisać użytkownika do grupy - powinniśmy z tego skorzystać. W tym przypadku mamy tylko datę wizyty, dlatego zastosowałem <strong>uczenie nienadzorowane</strong>. Każda inna metoda może być dobra (<em>hierarchical clustering</em> chociażby). Każda inna liczba grup też może być dobra. <strong>K-means i trzy grupy to tylko przykład!</strong></p>
+<p>W ramach ciekawostki możemy zrzutować naszą wielowymiarową przestrzeń na płaszczyznę - zwykle robi się to przy użyciu algorytmu PCA albo t-SNE. Dzisiaj ten drugi:</p>
+<pre class="r"><code># sprawdźmy czy tworzą się jakieś klastry
+library(Rtsne)
+tsne &lt;- Rtsne(wide_mat_dist, initial_dims = ncol(wide_mat_dist))
+
+tsne_df &lt;- as.data.frame(tsne$Y)
+
+plot &lt;- ggplot(tsne_df, aes(V1, V2)) + geom_point()
+
+da_plot(plot)</code></pre>
+<p><img src="blog_post_files/figure-html/ga2_06-1.png" width="768" /></p>
+<p>Widać jakieś grupy. Wiele ich. Można je wykorzystać do klasteryzacji (i dopiero tutaj nadawać klasy). My zrobiliśmy ją wcześniej, więc zobaczmy jak wyglądają te grupy na obrazie z t-SNE:</p>
+<pre class="r"><code>tsne_df$cluster &lt;- as.factor(km$cluster)
+
+plot &lt;- ggplot(tsne_df, aes(V1, V2, color = cluster)) + geom_point()
+
+da_plot(plot)</code></pre>
+<p><img src="blog_post_files/figure-html/ga2_07-1.png" width="768" /></p>
+<p>Ależ pięknie wyszło! Nie jest źle - poszczególne skupiska są w jednym kolorze. Gdyby było inaczej warto byłoby sprawdzić inną liczbę klastrów albo inny model klasteryzacji). Albo dzielić na klastry to co mamy po t-SNE (albo PCA).</p>
+<p>Albo (co wydaje się nawet sensowniejsze) cofnąć się jeszcze bardziej i spróbować wyłuskać inne cechy z danych (przebudować funkcję <code>prepare_data()</code>), może dorzucić jakieś dane? Nasze wyłuskane cechy są dość banalne, co zobaczymy za chwilę.</p>
+<p>Przygotujemy teraz model, tak aby dla nowych danych potrafił przypisać klasy. Może to być dowolny model kategoryzujący: od np. SVM, przez drzewa decyzyjne, las losowy (którego użyjemy), XGBoost, sieci neuronowe (FF pewnie najbardziej, można spróbować z CNN). Proste algorytmy <a href="/index.php/2017/03/07/kola-w-zbozu/">opisałem dawno temu</a>.</p>
+<pre class="r"><code>library(randomForest)
+
+model &lt;- randomForest(cluster ~ ., data = wide_mat_dist,
+                      importance = TRUE)</code></pre>
+<p>Las losowy wybrałem nieprzypadkowo - przede wszystkim jest stosunkowo szybki (jak na taką ilość danych), ale co ważniejsze - w prosty sposób możemy sprawdzić jakie cechy są najważniejsze dla modelu (stąd włączony parametr <em>importance</em>). Wszystkie parametry zostawiłem domyślne, aby już nie komplikować za bardzo.</p>
+<pre class="r"><code>varImpPlot(model)</code></pre>
+<p><img src="blog_post_files/figure-html/ga2_08-1.png" width="768" /></p>
+<p>I co tutaj widzimy? Że najważniejsze jest to w jakim dniu tygodnia była wizyta - czy był to weekend (cecha <em>w</em>) czy któryś z dni poniedziałek - piątek (cechy <em>w1</em> do <em>w5</em> - szczególnie wtorek <em>w2</em> i piątek <em>w5</em>). Godzina (cecha <em>h</em>) ma najmniejsze znaczenie, ważniejsza jest krotność powrotów (cecha <em>n_times</em>). Z godziną można sobie poradzić (próbować) - zamiast brać konkretną godzinę możemy podzielić dobę na kilka części (noc, rano, południe, popołudnie i wieczór) i albo użyć tego podziału w jednej zmiennej albo zrobić z niej kilka (one hot encoding).</p>
+<pre class="r"><code># dopisujemy klasy do szerokiej tabeli z user_id
+wide_mat$cluster &lt;- predict(model, wide_mat)
+
+# mając przypisanie user_id do klas możemy dodać klasy do danych źródłowych
+df_train_clusters &lt;- left_join(df_train,
+                               select(wide_mat, user_id, cluster),
+                               by = &quot;user_id&quot;)</code></pre>
+<p>Zakładamy w tym momencie, że nasz model działa poprawnie i jakoś dzieli odwiedzających. Sprawdźmy jak rozkłada się ruch w poszczególnych klasach.</p>
+<p>Na początek ruch dzień po dniu (tutaj dla czytelności obrazu wybieram jeden miesiąc). Na tym i kolejnych wykresach liczba wizyt w danum dniu jest zeskalowana do przedziału &lt;0;1&gt; aby sprowadzić wartości do jednej miary i uniezależnić od ewentualnych pików dla którejś z grup.</p>
+<pre class="r"><code>plot &lt;- df_train_clusters %&gt;%
+  filter(year(date) == 2017, month(date) == 4) %&gt;%
+  count(cluster, date) %&gt;%
+  group_by(cluster) %&gt;%
+  mutate(n_scaled = scale_num(n)) %&gt;%
+  ungroup() %&gt;%
+  ggplot() +
+  geom_area(aes(date, n_scaled, fill = cluster), alpha = 0.5, position = position_identity()) +
+  geom_line(aes(date, n_scaled, color = cluster)) +
+  labs(title = &quot;Znormalizowana liczba wizyt&quot;, x = &quot;&quot;, y = &quot;&quot;)
+
+da_plot(plot)</code></pre>
+<p><img src="blog_post_files/figure-html/ga2_09-1.png" width="768" /></p>
+<p>Coś widać. Szpilki są poprzesuwane względem siebie. Zobaczmy ruch według dni tygodnia:</p>
+<pre class="r"><code>plot &lt;- df_train_clusters %&gt;%
+  count(cluster, wday) %&gt;%
+  group_by(cluster) %&gt;%
+  mutate(n_scaled = scale_num(n)) %&gt;%
+  ungroup() %&gt;%
+  mutate(wday = fct_rev(wday)) %&gt;%
+  ggplot() +
+  geom_col(aes(wday, n_scaled, fill = cluster)) +
+  coord_flip() + 
+  facet_wrap(~cluster, scales = &quot;free_y&quot;) +
+  labs(title = &quot;Znormalizowana liczba wizyt według grupy i dnia tygodnia&quot;, x = &quot;&quot;, y = &quot;&quot;, fill = &quot;Grupa&quot;) +
+  theme(legend.position = &quot;bottom&quot;)
+
+da_plot(plot) + theme(legend.position = &quot;bottom&quot;)</code></pre>
+<p><img src="blog_post_files/figure-html/ga2_10-1.png" width="768" /></p>
+<p>Tutaj już wyraźniej widać użytkowników weekendowych (i jednocześnie poniedziałkowych, środowych i czwartkowych) i z konkretnych dni (część lubuje się we wtorkach, inni - w piątek; pamiętacie kilka obrazków wyżej ważność cech <em>w2</em> i <em>w5</em>?). A jak to się ma w podziale na godziny:</p>
+<pre class="r"><code>plot &lt;- df_train_clusters %&gt;%
+  count(cluster, hour) %&gt;%
+  group_by(cluster) %&gt;%
+  mutate(n_scaled = scale_num(n)) %&gt;%
+  ungroup() %&gt;%
+  ggplot() +
+  geom_col(aes(hour, n_scaled, fill = cluster)) +
+  facet_wrap(~cluster, scales = &quot;free_y&quot;) +
+  labs(title = &quot;Znormalizowana liczba wizyt według grupy i godziny&quot;, x = &quot;&quot;, y = &quot;&quot;, fill = &quot;Grupa&quot;) +
+  theme(legend.position = &quot;bottom&quot;)
+
+
+da_plot(plot) + theme(legend.position = &quot;bottom&quot;)</code></pre>
+<p><img src="blog_post_files/figure-html/ga2_11-1.png" width="768" /></p>
+<p>Szczerze mówiąc ma się nijak, chociaż nienaturalny wydaje się dołek w okolicach przedpołudniowych. Wiecie dlaczego tak jest? Bo to dane z amerykańskiej strony, a czas polski - w takim Nowym Jorku o naszej 10 rano jest środek nocy (4 rano) - stąd ten dołek.</p>
+<p>Dla wszystkich grup rozkłady wyglądają podobnie. To kolejny kamyczek (po sprawdzeniu ważności zmiennych) do ogródka <em>nie należy brać godziny jako cechę do modelu</em>.</p>
+<p>Na koniec możemy złożyć wykres tygodniowy i godzinowy w heat mapę:</p>
+<pre class="r"><code>plot &lt;-  df_train_clusters %&gt;%
+  count(cluster, wday, hour) %&gt;%
+  group_by(cluster) %&gt;%
+  mutate(n_scaled = scale_num(n)) %&gt;%
+  ungroup() %&gt;%
+     mutate(wday = fct_rev(wday)) %&gt;%
+  ggplot() +
+  geom_tile(aes(wday, hour, fill = n_scaled), color = &quot;gray50&quot;, show.legend = FALSE) +
+  facet_wrap(~cluster) +
+  scale_fill_distiller(palette = &quot;Greens&quot;, direction = 1) +
+  coord_flip() +
+  labs(title = &quot;Znormalizowana liczba wizyt według grupy, dnia tygodnia i godziny&quot;, x = &quot;&quot;, y = &quot;&quot;)
+
+da_plot(plot)</code></pre>
+<p><img src="blog_post_files/figure-html/ga2_12-1.png" width="864" /></p>
+<p>Gdyby godzina miała znaczenie dla przypisania do grup uzyskalibyśmy tutaj bardziej nasycone <em>placki</em> na przykład we wtorki rano w jednej grupie i w weekendy po południu w drugiej.</p>
+<p><strong>Gdybyśmy mieli więcej danych to byłoby łatwiej.</strong> W naszym przykładzie ograniczyliśmy się do minimum. Zapewne wystarczyłoby dorzucić informacje o pohodzeniu użytkownika i przeglądarce z jakiej korzysta. Dostalibyśmy na przykład grupy weekendowych wieczornych przeglądaczy na telefonie albo tych co szukają informacji podczas pracy korzystając z desktopów. Zerknijcie na <a href="https://www.kaggle.com/c/ga-customer-revenue-prediction/kernels">kernele do konkursu Kaggle</a>, z którego pobraliśmy dane - tam znajdziecie pełno EDA jak i samych modeli.</p>
+<p>Dla przychodzących do kina moglibyśmy dodać gatunek filmu, dla przychodzących do klubu fitness - zajęcia czy ćwiczenia z jakich korzysta, w jakie dni, w jakich porach (po pracy, przed pracą), czy są to konkretne kluby czy losowo wybrane, a może takie które z jakiegoś powodu (duży parking? po drodze z pracy do domu?) są lepsze czy wygodniejsze dla konkretnego użytkownika.</p>
+<p>Dane są wszędzie, trzeba tylko wiedzieć o chce się zmierzyć i odpowiednio je dobrać. Jeśli ich nie ma - może czas zacząć mierzyć? Jeśli prowadzisz biznes i zastanawiasz się jak skorzystać z posiadanych danych (albo jakie zacząć zbierać) - skontaktuj się ze mną, być może pomogę. A <a href="/index.php/oferta/">trochę</a> już w swoim życiu danych przerzuiłem w różne strony.</p>
+
+
+
+
+</div>
+
+<script>
+
+// add bootstrap table styles to pandoc tables
+function bootstrapStylePandocTables() {
+  $('tr.header').parent('thead').parent('table').addClass('table table-condensed');
+}
+$(document).ready(function () {
+  bootstrapStylePandocTables();
+});
+
+
+</script>
+
+<!-- dynamically load mathjax for compatibility with self-contained -->
+<script>
+  (function () {
+    var script = document.createElement("script");
+    script.type = "text/javascript";
+    script.src  = "https://mathjax.rstudio.com/latest/MathJax.js?config=TeX-AMS-MML_HTMLorMML";
+    document.getElementsByTagName("head")[0].appendChild(script);
+  })();
+</script>
+
+</body>
+</html>
