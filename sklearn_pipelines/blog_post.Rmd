@@ -1,0 +1,455 @@
+---
+title: "Pipeline w SciKit Learn"
+author: "Łukasz Prokulski"
+date: "`r Sys.Date()`"
+output: 
+  html_document: 
+    fig_width: 10
+    fig_height: 5
+    fig_align: "center"
+    self_contained: no
+---
+
+Co to są *pipelines* w sci-kit learn i jak je wykorzystać?
+Czyli **bardziej efektywne szukanie najlepszego modelu**.
+
+```{r document_setup, echo=FALSE, message=FALSE, error=FALSE, warning=FALSE}
+library(tidyverse)
+library(knitr)
+library(kableExtra)
+
+# chunks options
+opts_chunk$set(message = FALSE, error = FALSE, warning = FALSE)
+options(knitr.table.format = "html") 
+
+source("/home/lemur/Work/RProjects/!Rmarkdown_templates/da_plot.R")
+```
+```{r echo=FALSE, message=FALSE, error=FALSE, warning=FALSE}
+library(reticulate)
+```
+
+
+Jeśli zajmujesz się tworzeniem modeli na przykład klasyfikujących jakieś dane to pewnie wielokrotnie powtarzasz te same kroki:
+
+* wczytanie danych
+* oczyszczenie danych
+* uzupełnienie braków
+* przygotowanie dodatkowych cech (*feature engineering*)
+* podział danych na treningowe i testowe
+* dobór hyperparametrów modelu
+* trenowanie modelu
+* testowanie modelu (sprawdzenie skuteczności działania)
+
+I tak w kółko, z każdym nowy modelem.
+
+Jest to dość nudne i dość powtarzalne. Szczególnie jak trzeba wykonać różne kroki transformacji danych w różnej kolejności - *upierdliwe* staje się zmienianie kolejności w kodzie.
+
+Dlatego wymyślono **pipelines**.
+
+Dlatego w tym i kolejnych postach zajmiemy się tym mechanizmem.
+
+Zaczniemy od podstaw *data science*, czyli...
+
+
+```{python libs1}
+# bez tego nie ma data science! ;)
+import pandas as pd
+
+# być może coś narysujemy
+import matplotlib.pyplot as plt
+import seaborn as sns
+
+import time
+```
+
+Wszystkie elementy jakich będziemy używać znajdują się w ramach biblioteki **scikit-learn**. Zaimportujemy co trzeba plus kilka modeli z oddzielnych bibliotek.
+
+
+```{python libs2}
+from sklearn.model_selection import train_test_split
+
+# modele
+from sklearn.dummy import DummyClassifier
+from sklearn.linear_model import LogisticRegression
+from sklearn.tree import ExtraTreeClassifier
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.svm import SVC
+from sklearn.neighbors import KNeighborsClassifier
+
+# preprocessing
+## zmienne ciągłe
+from sklearn.preprocessing import StandardScaler, MinMaxScaler, Normalizer
+## zmienne kategoryczne
+from sklearn.preprocessing import OrdinalEncoder, OneHotEncoder
+
+# Pipeline
+from sklearn.pipeline import Pipeline
+from sklearn.compose import ColumnTransformer
+
+
+# dodatkowe modele spoza sklearn
+from xgboost import XGBClassifier
+from catboost import CatBoostClassifier
+from lightgbm import LGBMClassifier
+```
+
+Skąd wziąć dane? Można użyć wbudowanych w sklearna *irysów* czy *boston housing* ale mi zależało na znalezieniu takiego datasetu, który będzie zawierał cechy zarówno ciągłe jak i kategoryczne. Takim zestawem jest **Adult** znany też jako **Census Income**, a ściągnąć go można z [UCI](https://archive.ics.uci.edu/ml/datasets/Adult) (studenci i absolwenci AGH mogą mylić z [UCI](https://historia.agh.edu.pl/wiki/Uczelniane_Centrum_Informatyki) w budynku C-1).
+
+Pobieramy (potrzebne nam będą pliki [adult.data](https://archive.ics.uci.edu/ml/machine-learning-databases/adult/adult.data) oraz [adult.test](https://archive.ics.uci.edu/ml/machine-learning-databases/adult/adult.test)) dane, wrzucamy surowe pliki do katalogu *data/* i wczytujemy.
+
+
+```{python readdata}
+# dane nie mają nagłówka - samo sobie nadamy nazwy kolumn
+col_names= ['age', 'work_class', 'final_weight', 'education', 'education_num',
+            'marital_status', 'occupation', 'relationship', 'race', 'sex',
+            'capital_gain', 'capital_loss', 'hours_per_week', 'native_country',
+            'year_income']
+
+# wczytujemy dane
+adult_dataset = pd.read_csv("data/adult.data",
+                            engine='python', sep=', ', # tu jest przeciek i spacja!
+                            header=None, names=col_names,
+                            na_values="?")
+
+# kolumna 'final_weight' do niczego się nie przyda, więc od razu ją usuwamy
+# wiadomo to z EDA, które tutaj pomijamy
+adult_dataset.drop('final_weight', axis=1, inplace=True)
+
+# usuwamy braki, żeby uprościć przykład
+adult_dataset.dropna(inplace=True)
+```
+
+Zobaczmy jakie mamy typy danych w kolumnach:
+
+
+```{python eda1}
+print(adult_dataset.dtypes)
+```
+
+A teraz standardowo - dzielimy dane na zbiór treningowy i testowy. Przy okazji z całej ramki danych wyciągamy kolumnę `year_income` jako **Y**, a resztę jako **X**. Szalenie wygodnym jest nazywanie cech zmienną **X** a *targetów* **y** - przy *Ctrl-C + Ctrl-V* ze StackOverflow niczego właściwie nie trzeba robić ;)
+
+
+```{python traintestsplit}
+X_train, X_test, y_train, y_test = train_test_split(adult_dataset.drop('year_income', axis=1),
+                                                    adult_dataset['year_income'],
+                                                    test_size=0.3,
+                                                    random_state=42)
+```
+
+Sporą część wstępnej analizy pomijam w tym wpisie, ale jeśli nie wiesz dlaczego wybieram takie a nie inne kolumny to zrób samodzielnie analizę danych w tym zbiorze. 
+
+**Czas na trochę informacji o *rurociągach*.**
+
+W dużym uproszczeniu są to połączone sekwencyjnie (jedna za drugą, wyjście pierwszej trafia na wejście drugiej i tak dalej do końca) operacje. Operacje czyli klasy, które posiadają metody `.fit()` i `.transform()`.
+
+Rurociąg może składać się z kilku rurociągów połączonych jeden za drugim - taki model zastosujemy za chwilę.
+
+Powiedzieliśmy sobie wyżej, że pierwszy krok to przygotowanie danych - odpowiednie transformacje danych źródłowych i ewentualnie uzupełnienie danych brakujących. W dzisiejszym przekładzie brakujące dane (około 7% całości) po prostu wyrzuciliśmy przez `dropna()`, więc uzupełnieniem braków się nie zajmujemy. Ale może w kolejnej części już tak.
+
+Drugim krokiem jest przesłanie danych odpowiednio obrobionych do modelu i jego wytrenowanie.
+
+**No to do dzieła, już konkretnie - transformacja danych**
+
+Zatem na początek przygotujemy sobie fragmenty całego *rurociągu* odpowiedzialnego za transformacje kolumn. Mamy dwa typy kolumn, zatem zbudujemy dwa małe rurociągi.
+
+Pierwszy będzie odpowiedzialny za kolumny z wartościami liczbowymi. Nie wiemy czy są to wartości ciągłe (jak na przykład wiek) czy dyskretne (tutaj taką kolumną jest `education_num` mówiąca o poziome edukacji) i poniżej bierzemy wszystkie jak leci. Znowu: porządna EDA wskaże nam odpowiednie kolumny.
+
+Najpierw wybieramy wszystkie kolumny o typie numerycznym, a potem budujemy mini-rurociąg `transformer_numerical`, którego jedynym krokiem będzie wywołanie `StandardScaler()` zapisane pod nazwą `num_trans` (to musi być unikalne w całym procesie). Kolejny krok łatwo dodać - po prostu dodajemy kolejnego *tupla* w takim samym schemacie.
+
+**Co nam to daje?** Ano daje to tyle, że mamy konkretną nazwę dla konkretnego kroku. Później możemy się do niej dostać i na przykład zmienić: zarówno metodę wywoływaną w tym konkretnym kroku jak i parametry tej metody.
+
+
+```{python num_trans}
+# lista kolumn numerycznych
+cols_numerical = X_train.select_dtypes(include=['int64', 'float64']).columns
+
+# transformer dla kolumn numerycznych
+transformer_numerical = Pipeline(steps = [
+    ('num_trans', StandardScaler())
+])
+```
+
+To samo robimy dla kolumn z wartościami kategorycznymi - budujemy mini-rurociąg `transformer_categorical`, który w kroku `cat_trans` wywołuje `OneHotEncoder()`.
+
+
+```{python cat_trans}
+# lista kolmn kategorycznych
+cols_categorical = ['work_class', 'education', 'marital_status', 'occupation',
+                    'relationship', 'race', 'sex', 'native_country']
+
+# transformer dla kolumn numerycznych
+transformer_categorical = Pipeline(steps = [
+    ('cat_trans', OneHotEncoder())
+])
+```
+
+Co dalej? Z tych dwóch małych rurociągów zbudujemy większy - `preprocessor`. Właściwie to będzie to swego rodzaju rozgałęzienie - **ColumnTransformer** który jedne kolumny puści jednym mini-rurociągiem, a drugie - drugim. I znowu: tutaj może być kilka elementów, oddzielne *przepływy* dla konkretnych kolumn (bo może jedne ciągłe chcemy skalować w jeden sposób, a inne w inny? A może jedne zmienne chcemy uzupełnić średnią a inne medianą?) - mamy pełną swobodę.
+
+
+```{python preprocesor}
+# preprocesor danych
+preprocessor = ColumnTransformer(transformers = [
+    ('numerical', transformer_numerical, cols_numerical),
+    ('categorical', transformer_categorical, cols_categorical)
+])
+```
+
+Cała rura to złożenie odpowiednich elementów w całość - robiliśmy to już wyżej:
+
+
+```{python whole_pipe}
+pipe = Pipeline(steps = [
+                ('preprocessor', preprocessor),
+                ('classifier', RandomForestClassifier())
+            ])
+```
+
+Teraz **cały proces** wygląda następująco:
+
+* najpierw preprocessing:
+    * dla kolumn liczbowych wykonywany jest `StandardScaler()`
+    * dla kolumn kategorycznych - `OneHotEncoder()`
+* złożone dane przekazywane są do `RandomForestClassifier()`
+
+ 
+ Proces trenuje się dokładne tak samo jak model - poprzez wywołanie metody `.fit()`:
+
+
+```{python pipe_fit}
+pipe.fit(X_train, y_train)
+```
+
+Oczywiście predykcja działa tak samo *jak zawsze*:
+
+
+```{python pipe_pred}
+pipe.predict(X_test)
+```
+
+Są też metody zwracające prawdopodobieństwo przypisania do każdej z klas `.predict_proba()` oraz jego logarytm `.predict_log_proba()`.
+
+```{python pipe_predproba}
+pipe.predict_proba(X_test)
+```
+
+
+Po wytrenowaniu na danych treningowych (cechy *X_train*, target *y_train*) możemy zobaczyć ocenę modelu na danych testowych (odpowiednio *X_test* i *y_test*):
+
+```{python pipe_score}
+pipe.score(X_test, y_test)
+```
+
+Świetnie, świetne, ale to samo można bez tych pipelinów, nie raz na Kaggle tak robili i działało. Więc **po co to wszystko?**
+
+Ano po to, co nastąpi za chwilę.
+
+Mamy cały proces, każdy jego krok ma swoją nazwę, prawda? A może zamiast *StandardScaler()* lepszy będzie *MinMaxScaler()*? A może inna klasa modeli (zamiast lasów losowych np. XGBoost?). A gdyby sprawdzić każdy model z każdą transformacją? No to się robi sporo kodu... A nazwane kroki w procesie pozwalają na prostą podmiankę!
+
+Zdefiniujmy sobie przestrzeń poszukiwań najlepszego modelu i najlepszych transformacji:
+
+
+```{python pipe_params_grid}
+# klasyfikatory                            
+classifiers = [
+    DummyClassifier(strategy='stratified'),
+    LogisticRegression(max_iter=500), # można tutaj podać hiperparametry
+    KNeighborsClassifier(2), # 2 bo mamy dwie klasy
+    ExtraTreeClassifier(),
+    RandomForestClassifier(),
+    SVC(),
+    XGBClassifier(),
+    CatBoostClassifier(silent=True),
+    LGBMClassifier(verbose=-1)
+]
+
+# transformatory dla kolumn liczbowych
+scalers = [StandardScaler(), MinMaxScaler(), Normalizer()]
+
+# transformatory dla kolumn kategorycznych
+cat_transformers = [OrdinalEncoder(), OneHotEncoder()]
+```
+
+Teraz w zagnieżdżonych pętlach możemy sprawdzić *każdy z każdym* podmieniając klasyfikatory i transformatory (cała pętla trochę się kręci):
+
+
+```{python main_loop}
+# miejsce na zebranie wyników
+models_df = pd.DataFrame()
+
+# przygotowujemy pipeline
+pipe = Pipeline(steps = [
+    ('preprocessor', preprocessor), # mniejszy pipeline
+    ('classifier', None) # to ustalimy za moment
+])
+
+# dla każdego typu modelu zmieniamy kolejne transformatory kolumn
+for model in classifiers:
+    for num_tr in scalers:
+        for cat_tr in cat_transformers:
+            # odpowiednio zmieniamy jego paramety - dobieramy transformatory
+            pipe_params = {
+                'preprocessor__numerical__num_trans': num_tr,
+                'preprocessor__categorical__cat_trans': cat_tr,
+                'classifier': model
+            }
+            pipe.set_params(**pipe_params)
+
+            # zbieramy w dict parametry dla Pipeline
+            param_dict = {
+                        'model': model.__class__.__name__,
+                        'num_trans': num_tr.__class__.__name__,
+                        'cat_trans': cat_tr.__class__.__name__
+                    }
+
+            # wypisujemy je
+            print('='*40)
+            print(param_dict)
+            
+            # trenujemy tak przygotowany model (cały pipeline) mierząc ile to trwa
+            start_time = time.time()
+            pipe.fit(X_train, y_train)   
+            end_time = time.time()
+
+            # sprawdzamy jak wyszło
+            score = pipe.score(X_test, y_test)
+
+            # i informyjemy o tym
+            print(f"Score: {round(100*score, 2)}%, Time: {(end_time-start_time):.3} s")
+
+            # i dodajemy do tabelki wszystkich wyników (razem z parametrami)
+            param_dict['score'] = score
+            param_dict['time_elapsed'] = end_time - start_time
+            
+            models_df = models_df.append(pd.DataFrame(param_dict, index=[0]))
+
+models_df.reset_index(drop=True, inplace=True)
+```
+
+Teraz w jednej tabeli mamy wszystkie interesujące dane, które mogą posłużyć nam chociażby do znalezienia najlepszego modelu:
+
+```{r echo=FALSE}
+# kopiujemy dataframe do Ra
+df <- py$models_df
+rownames(df) <- make.names(rownames(df), unique = TRUE)
+```
+
+```{python table1, eval=FALSE}
+models_df.sort_values('score', ascending=False)
+```
+```{r table1r, echo=FALSE}
+df %>%
+  arrange(desc(score)) %>%
+  mutate_if(.predicate = is.numeric, function(x)  round(x, 3)) %>%
+  kable(row.names = FALSE) %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed", "responsive"),
+                full_width = TRUE, font_size = 7)
+```
+
+Ale *najlepszy* może być w różnych kategoriach - nie tylko skuteczności, ale też na przykład czasu uczenia czy też stabilności wyniku. Zobaczmy podstawowe statystyki dla typów modeli:
+
+
+```{python table2, eval=FALSE}
+models_df[['model', 'score', 'time_elapsed']] \
+    .groupby('model') \
+    .aggregate({
+        'score': ['mean','std', 'min', 'max'],
+        'time_elapsed': ['mean','std', 'min', 'max']
+        }) \
+    .reset_index() \
+    .sort_values(('score', 'mean'), ascending=False)
+```
+```{r table2r, echo=FALSE}
+df %>%
+  group_by(model) %>%
+  summarise(
+    score_mean = mean(score),
+    score_std = sd(score),
+    score_min = min(score),
+    score_max = max(score),
+    time_mean = mean(time_elapsed),
+    time_std = sd(time_elapsed),
+    time_min = min(time_elapsed),
+    time_max = max(time_elapsed)
+  ) %>%
+  mutate_if(.predicate = is.numeric, function(x)  round(x, 3)) %>%
+  ungroup() %>%
+  arrange(desc(score_mean)) %>%
+  set_names(c("model", "mean", "std", "min", "max",  "mean", "std", "min", "max")) %>%
+  kable(row.names = FALSE) %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed", "responsive"),
+                full_width = TRUE, font_size = 7) %>%
+  add_header_above(c(" " = 1, "score" = 4, "time" = 4))
+```
+
+Tutaj tak na prawdę nie mierzymy stabilności modelu - podajemy różnie przetworzone dane do tego samego modelu. Stabilność można zmierzyć puszczając na model fragmentaryczne dane, co można zautomatyzować poprzez *KFold*/*RepeatedKFold* (z sklearn.model_selection), ale dzisiaj nie o tym.
+
+Sprawdźmy który rodzaj modelu daje najlepszą skuteczność:
+
+
+```{python plot1, eval=FALSE}
+sns.boxplot(data=models_df, x='score', y='model')
+```
+```{r pipeline_cz1_01, echo=FALSE}
+p <- df %>%
+  ggplot() +
+  geom_boxplot(aes(x=score, y=model, fill=model), show.legend = FALSE) +
+  scale_x_continuous(breaks = seq(0, 1, 0.025), labels = scales::percent) +
+  labs(x="accuracy", y="")
+
+da_plot(p)
+```
+
+
+Ostatnie trzy (XGBoost, LigthGBM i CatBoost) dają najlepsze wyniki i pewnie warto je brać pod uwagę w przyszłości.
+
+A czy są różnice pomiędzy transformatorami?
+
+
+```{python plot2, eval=FALSE}
+sns.boxplot(data=models_df, x='score', y='num_trans')
+```
+```{r pipeline_cz1_02, echo=FALSE}
+p <- df %>%
+  ggplot() +
+  geom_boxplot(aes(x=score, y=num_trans, fill=num_trans), show.legend = FALSE) +
+  scale_x_continuous(breaks = seq(0, 1, 0.025), labels = scales::percent) +
+  labs(x="accuracy", y="")
+
+da_plot(p)
+```
+
+
+```{python plot3, eval=FALSE}
+sns.boxplot(data=models_df, x='score', y='cat_trans')
+```
+```{r pipeline_cz1_03, echo=FALSE}
+p <- df %>%
+  ggplot() +
+  geom_boxplot(aes(x=score, y=cat_trans, fill=cat_trans), show.legend = FALSE) +
+  scale_x_continuous(breaks = seq(0, 1, 0.025), labels = scales::percent) +
+  labs(x="accuracy", y="")
+
+da_plot(p)
+```
+
+Przy tych danych wygląda, że właściwie nie ma większej różnicy (nie bijemy się tutaj o 0.01 punktu procentowego poprawy *accuracy* modelu). Może więc czas treningu jest istotny?
+
+
+```{python plot4, eval=FALSE}
+sns.boxplot(data=models_df, x='time_elapsed', y='model')
+```
+```{r pipeline_cz1_04, echo=FALSE}
+p <- df %>%
+  ggplot() +
+  geom_boxplot(aes(x=time_elapsed, y=model, fill=model), show.legend = FALSE) +
+  labs(x="time elapsed [s]", y="")
+
+da_plot(p)
+```
+
+Mamy kilku liderów, ale z tych które dawały najlepsze wyniki warto wziąć pod uwagę XGBoosta i LightGBM.
+
+Dzięki przećwiczeniu kilku modeli mamy dwóch najbardziej efektywnych (czasowo) i efektownych (z najlepszym *accuracy*) kandydatów do dalszych prac. Wyszukanie ich to kilka linii kodu. Jeśli przyjdzie nam do głowy nowy model - dodajemy go do listy `classifiers`. Jeśli znajdziemy inny transformator - dopisujemy do listy `scalers` lub `cat_transformers`. Nie trzeba kopiować dużych kawałków kodu, nie trzeba właściwie pisać nowego kodu.
+
+
+Dokładnie tym samym sposobem możemy poszukać *hyperparametrów* dla konkretnego modelu i zestawu transformacji w **pipeline**. Ale to już w następnym odcinku.
