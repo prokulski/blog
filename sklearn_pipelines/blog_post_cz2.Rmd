@@ -1,0 +1,321 @@
+---
+title: "Pipeline w SciKit Learn - własny estymator"
+author: "Łukasz Prokulski"
+date: "`r Sys.Date()`"
+output: 
+  html_document: 
+    self_contained: no
+---
+
+
+```{r document_setup, echo=FALSE, message=FALSE, error=FALSE, warning=FALSE}
+library(tidyverse)
+library(knitr)
+library(kableExtra)
+
+# chunks options
+opts_chunk$set(message = FALSE, error = FALSE, warning = FALSE)
+options(knitr.table.format = "html") 
+
+source("/home/lemur/Work/RProjects/!Rmarkdown_templates/da_plot.R")
+```
+```{r echo=FALSE, message=FALSE, error=FALSE, warning=FALSE}
+library(reticulate)
+```
+
+Dzisiaj napiszemy własny (a raczej poznamy mechanikę działania) oraz nauczymy się szukać najlepszych hyper parametrów dla modelu (właściwie: całego pipeline) w zwarty sposób.
+
+
+[W pierszej części](/index.php/2020/10/10/pipeline-w-scikit-learn/) zobaczyliśmy jak zbudować *pipeline* dla danych i modeli. Dzięki temu dostaliśmy możliwość zmiany sposobu transformacji danych i zmiany modeli w ramach prostego, zwartego kodu. Ale co jeśli potrzebujemy jakiś *transformator* którego nie ma w pakietach?
+
+Tak jak poprzednio - nasze działania oprzemy na Pythonie i pakiecie scikit learn. Podobne rozwiązania można znaleść w R (jeśli tego szukasz - zainteresuj się [Tidymodels](https://www.tidymodels.org/)).
+
+
+```{python}
+# bez tego nie ma data science! ;)
+import pandas as pd
+import numpy as np
+from random import random
+
+# modele
+from sklearn.dummy import DummyClassifier
+
+# preprocessing - bazowe klasy
+from sklearn.base import BaseEstimator, TransformerMixin
+
+# Pipeline
+from sklearn.pipeline import Pipeline
+```
+
+Aby zobaczyć co się dzieje wewnątrz kolejnych budowanych przez nas metod zbudujemy sobie prosty zestaw danych. W dzisiejszym ćwiczeniu nie chodzi o znalezienie konkretnego modelu czy też najlepszego wyniku - dane mogą być więc dowolne, ważne żebyśmy widzieli na nich efekty działań naszego kodu.
+
+
+```{python}
+# cechy
+X = pd.DataFrame({"Title": ["T1","T2","T3","T4","T5","T6"],
+                  "Body": ["B1","B2","B3","B4","B5","B6"],
+                  "Code": ["C1","C2","C3","C4","C5","C6"]})
+# odpowiedź
+y = np.array([1.,0.,1.,0.,1.,1.])
+```
+
+### Własny transformer/estymator
+
+Budujemy pierwszy *transformer*. Tutaj przyda się podstawowa wiedza na temat programowania obiektowego - co to jest klasa, co to są metody tej klasy, co to jest dziedziczenie i jak to wygląda w Pythonie. Zakładam, że znasz te podstawy.
+
+Nasz *transformer* potrzebuje dwóch metod: `fit()` oraz `transform()`. Wiemy jak działają transformery i modele w scikit-learn, prawda? Uczymy je na danych treningowych poprzez wywołanie metody `fit()` a potem stosujemy przekaształcenie do danych treningowych poprzez `transform()` (często stosuje się też od razu uczenie i przekaształcenie wywołując `fit_transform()`), zaś dane testowe (czy też nowe dane) traktujemy jedynie przez `transfor()`.
+
+Często modele/transformery mają jakieś parametry. Podaje się je podczas budowania klasy - czyli wywołuje się *konstruktora* klasy `__init__()` z odpowiednimi patametrami. Konstruktor "zapamiętuje" w ramach obiektu te parametry (w Pythonie jest to po prostu ustawienie wartości zmiennych `self.cośtam` dostępnych w ramach całego obiektu). Tak wygląda teoria, konkrety tłumaczy kod poniżej:
+
+
+```{python}
+class MyTransformer(BaseEstimator, TransformerMixin):
+
+    def __init__(self, param_a = [], param_b = 1):
+        """
+        Konstruktor naszego obiektu MyTransformer.
+        
+        Przyjmuje dwa parametry:
+        * param_a - lista
+        * param_b - wartość liczbowa, domyślnie równa 1
+        """
+
+        # zapamiętujemy hyper paramtery w ramach obiektu
+        self.param_a = param_a
+        self.param_b = param_b
+
+        # tą wartość "wyprodukuje" metoda fit()
+        self.fitted = None
+
+        # wypisujemy co się dzieje
+        print("\n= LOG BEG =========================")
+        print("MyTransformer.__init__():")
+        print(f"param_a:\n{self.param_a}\n")
+        print(f"param_b:\n{self.param_b}\n")
+        print(f"fitted:\n{self.fitted}")
+        print("= LOG END =========================\n")
+
+
+    def fit(self, x, y=None):
+        """
+        Metoda ta powinna "nauczyć" parametry w ramach obiektu.
+        Tutaj parametry te są losowo nadane.
+        
+        Pobiera paramety:
+        * x - cechy
+        * y - odpowiedź (ważne dla modelu, przy transformacji bez znaczenia) 
+        """
+
+        # ustalamy parametry transformatora - jedna losowa liczba 0 lub 1
+        self.fitted = np.round(np.random.random(1))
+
+        # wypisujemy co się dzieje i przy jakich parametrach
+        print("\n= LOG BEG =========================")
+        print("MyTransformer.fit():")
+        print(f"x:\n{x}\n")
+        print(f"y:\n{y}\n")
+        print(f"param_a:\n{self.param_a}\n")
+        print(f"param_b:\n{self.param_b}\n")
+        print(f"fitted:\n{self.fitted}")
+        print("= LOG END =========================\n")
+
+        return self
+
+
+    def transform(self, x):
+        """
+        Metoda zmienia dane, korzystając z wyuczonych w fit() parametrów.
+        
+        Tutaj zwróci tyle razy wartość wyuczoną w ramach fit() ile jest wierszy danych wejściowych
+        """
+        
+        # szykujemy odpowiedź
+        ret_val = np.repeat(self.fitted, x.shape[0])
+
+        # wypisujemy co się dzieje
+        print("\n= LOG BEG =========================")
+        print("MyTransformer.transform():")
+        print(f"x:\n{x}\n")
+        print(f"y:\n{y}\n")
+        print(f"param_a:\n{self.param_a}\n")
+        print(f"param_b:\n{self.param_b}\n")
+        print(f"fitted:\n{self.fitted}\n")
+        print(f"ret_val:\n{ret_val}")
+        print("= LOG END =========================\n")
+
+        return ret_val
+
+    
+    def show_fitted(self):
+        """
+        Ta metoda nie jest potrzebna, ale tutaj przyda się nam aby pokazać jaką wartość mają wyuczone parametry.
+        """
+
+        print(self.fitted)
+
+```
+
+Mając zbudowaną klasę możemy sprawdzić jak ona się zachowuje. Najpierw "samodzielnie", a później upakujemy ją w pipeline.
+
+Co się stanie jak utworzymy obiekt naszej klasy? Powinna wykonać się metoda `__init__()` - spróbujmy od razu podać parametry:
+
+
+```{python}
+obj = MyTransformer(param_a=['a', 'b', 'c'], param_b=123)
+```
+
+I zadziałało zgodnie z planem - wypisały się podane przez nas parametry, a *fitted* jest jeszcze nie zdefiniowany.
+Ale czy na pewno?
+
+
+```{python}
+obj.show_fitted()
+```
+
+Zgadza się. Zatem wyuczmy (*dofitujmy*) nasz obiekt na danych przygotowanych wyżej:
+
+
+```{python}
+obj.fit(X)
+```
+
+```{python}
+obj.show_fitted()
+```
+
+Wszystko się zgadza. A co się stanie jak zrobimy transformację?
+
+
+```{python}
+obj.transform(X)
+```
+
+Poza wypisaniem jakichś parametrów obiektu dostaliśmy tablicę pięciu wartości równych temu co jest w *fitted*. I właśnie o to chodziło. Tutaj jest tablica długa na tyle na ile mamy rekordów w danych - musimy dostać listę, którą da się porówanać z wartościami Y naszych danych.
+
+Ale miało być o pipeline'ach - zatem użymy naszego transformera, a za klasyfikator weźmiemy najprostrzy DummyClassifier() w dodatku skonfigurowany tak, aby zawsze odpowiadał wartością 0, nie ważne jakie są cechy konkretnej próbki (to ułatwi nam porównanie wyników).
+
+
+```{python}
+pipe = Pipeline(steps = [
+                ('preprocessor', MyTransformer(param_a=[1,2,3], param_b=10)),
+                ('classifier', DummyClassifier(strategy='constant', constant=0))
+            ])
+```
+
+Co się wydarzyło? A no tylko tyle, że wywołaliśmy konstruktora.
+
+Co zrobi *fitowanie* całego pipeline'u?
+
+```{python}
+pipe.fit(X, y)
+```
+
+Wykonało się najpierw *fit()* a potem *transform()*.
+
+Po *fitowaniu* możemy ocenić nasz model:
+
+```{python}
+pipe.score(X, y)
+```
+
+Widzimy że wykonał się *transformer* z już wyuczonymi wartościami *fitted*. Odpowiedzią w tym przypadku jest *accuracy* - mamy do czynienia z modelem klasyfikującym.
+
+Oczywiście otrzymana wartość predykcji zależy od tego jak wylosował nam się w ramach *fit* parametr *fitted*, ale w **tym konkretnym przypadku** zawsze będziemy mieć 1/3 skuteczności (bo mamy 2 zera i 4 jedynki w danych, a DummyClassifier skonfigurowaliśmy tak, aby zawszse zwracał zero).
+
+**Do czego to wszystko może być potrzebne?** Do kazdej sytuacji, w której nie mamy gotowego rozwiązania. Nie mamy (a przynajmniej nie kojarzę) transformatora który na przykład zamieni nam zapis liczb dziesiętnych z 12.345,67 na 12345.67 i zmieni otrzymaną wartość na *float*. Oczywiście przykłady można mnożyć - to jeden z najprostrzych.
+
+### Szukanie najlepszych hyper parametrów
+
+No dobrze - wiemy jak przygotować swoje transformatory danych (spróbuj analogicznie przygotować estymatory!), a nawet dać im możliwość *kręcenia śrubkami* w postaci hyper parametrów. Ale jak znaleźć najlepszą kombinację hyper parametrów?
+
+Użyjemy przeszukiwania po siatce wszystkich parametrów. SciKit Learn ma to na dzień dobry:
+
+
+```{python}
+from sklearn.model_selection import GridSearchCV
+```
+
+Do tego ćwiczenia przygotujemy inną wersję naszego transformatora - takiego, który podczas *fittowania* niczego nie robi, ale podczas transformacji już coś się dzieje (i jest to zależne od hyper parametrów):
+
+```{python}
+class MyTransformerTwo(BaseEstimator, TransformerMixin):
+    def __init__(self, param_a = [], param_b = 1):
+        self.param_a = param_a
+        self.param_b = param_b
+
+    def fit(self, x, y=None):
+        return self
+
+    def transform(self, x):
+        titles = ",".join(x.Title)
+        if np.sum(self.param_a)/(1+self.param_b) >= 10:
+            ret_val = np.zeros(x.shape[0])
+        else:
+            ret_val = np.ones(x.shape[0])
+        print(f"x.shape: {x.shape} ({titles}) \t\t\tparam_a: {self.param_a} \t\tparam_b: {self.param_b}\t\tret_val: {ret_val}")
+        
+        return ret_val
+```
+
+Podobnie jak już wiele razy wcześniej - budujemy pipeline i siatkę parametrów do przeszukania. Dla naszego przykładu nie będziemy zmieniać parametrów klasyfikatora (i tak jak poprzenio zawsze dostaniemy jedynkę) - dzięki temu zobaczymy jakie są kolejne przebiegi po siatce.
+
+
+```{python}
+pipe_two = Pipeline(steps=[
+    ('preprocessor', MyTransformerTwo()),
+    ('classifier', DummyClassifier(strategy='constant', constant=1))
+])
+
+param_grid = {
+    'preprocessor__param_a': [[1, 2, 3], [4, 5, 6]],
+    'preprocessor__param_b': [0, 1]
+}
+```
+
+No to szukamy. Przy okazji (parametr *cv*) włączamy walidację krzyżową (*cross validation*) - dla każdej kombinacji parametrów podzielimy zbiór na dwa *foldy*.
+
+
+```{python}
+grid = GridSearchCV(pipe_two, param_grid, cv=2)
+grid.fit(X, y)
+```
+
+Każdy przebieg to jeden wiersz w powyższym listingu. I w wierszu tym widzimy które z elementów służyły jako dane treningowe oraz jakie hyper parametry zostały podane na "rurociąg". Nie widzimy wyniku modelu dla takich parametrów (za moment zobaczymy), ale możemy szybko znaleźć najlepszy wynik:
+
+
+```{python}
+grid.best_score_
+```
+
+Wszytkie wyniki oczywiście też. Ale uwaga - są to wartości dla danej kombinacji parametrów (odpowiednio uśrednione) a nie konkretnego przebiegu w ramach puli parametrów. To nawet lepiej - mamy wynik bardziej stabilny (uwzględniający *cross validation*):
+
+```{python}
+grid.cv_results_
+```
+
+Dość długa ta lista, najprościej uzyskać zestaw najlepszych hyper parametrów przez
+
+
+```{python}
+grid.best_params_
+```
+
+Wytrenowany obiekt typu GridSearch() jest tym samym co wytrenowany pipeline czy też gotowy estymator, tak więc już na nim możemy użyć metod do predykcji (oczywiście skorzysta wtedy z najlepszych hyperparametrów):
+
+
+```{python}
+grid.predict(X)
+```
+
+Wydawać się może dziwne, że wszystkie kombinacje parametrów dały 66% skuteczności. Ale spójrz na dobór próbek do *foldów* - mamy zestaw T1, T2 i T3 i drugi zestaw to T3, T4, T5. Patrząc na tabelę z danymi:
+
+```{python}
+X['y'] = y
+X
+```
+
+widać, że w tych kombinacjach zawsze mamy dwie jedynki i jedno zero (a DummyClassifier zawsze zwraca 1) więc zawsze w 2/3 "pasuje".
+
+
+
+**Czy przeszukiwanie całej siatki hyper parametrów to najlepszy sposób?** Na to pytanie odpowiemy sobie w części kolejnej.
