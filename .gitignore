@@ -11,3 +11,4 @@ AutorKsiazki/ksiazki/Mroz-Kasacja.txt
 AutorKsiazki/ksiazki/Mroz-Rewizja.txt
 AutorKsiazki/ksiazki/Mroz-Zaginiecie.txt
 client_category/data/**
+sklearn_pipelines/catboost_info/**
