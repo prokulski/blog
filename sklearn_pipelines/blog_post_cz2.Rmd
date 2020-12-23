@@ -7,7 +7,6 @@ output:
     self_contained: no
 ---
 
-
 ```{r document_setup, echo=FALSE, message=FALSE, error=FALSE, warning=FALSE}
 library(tidyverse)
 library(knitr)
@@ -15,7 +14,7 @@ library(kableExtra)
 
 # chunks options
 opts_chunk$set(message = FALSE, error = FALSE, warning = FALSE)
-options(knitr.table.format = "html") 
+options(knitr.table.format = "html")
 
 source("/home/lemur/Work/RProjects/!Rmarkdown_templates/da_plot.R")
 ```
