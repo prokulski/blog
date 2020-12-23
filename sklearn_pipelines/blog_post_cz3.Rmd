@@ -16,21 +16,25 @@ Kontynuując cykl o Pipelines w SciKit-Learn zajmiemy się tematem *kręcenia ś
 library(tidyverse)
 library(knitr)
 library(kableExtra)
+library(reticulate)
 
 # chunks options
-opts_chunk$set(message = FALSE, error = FALSE, warning = FALSE, echo=FALSE)
+opts_chunk$set(message = FALSE, error = FALSE, warning = FALSE, echo = TRUE)
 options(knitr.table.format = "html")
 
 # source("/home/lemur/RProjects/!Rmarkdown_templates/da_plot.R")
 ```
-```{r echo=FALSE, message=FALSE, error=FALSE, warning=FALSE}
-library(reticulate)
+```{python}
+import matplotlib
+matplotlib.use('Agg')
 ```
+
 
 W poprzednich częściach poznawaliśmy co to "pipeline" w SciKit-Learn, tworzyliśmy własne estymatory (przy okazji ucząc się trochę o programowaniu obiektowym, klasach i dziedziczeniu - nawet jeśli to było nieświadome). Dzisiaj ostatnia część z cyklu - kręcenie śrubkami zwanymi hyperparametrami.
 
-W poprzedniej części przeszukiwaliśmy siatkę hyperparametrów (wszystkie możliwe kombinacje) przy użyciu wbudowanych w SciKit-Learn mechanizmów (na przykład GridSearchCV). Dzisiaj poszukamy innej metody, innego pakietu. A będzie nim `hyperopt`.
+Ostatnio przeszukiwaliśmy siatkę hyperparametrów (wszystkie możliwe kombinacje) przy użyciu wbudowanych w SciKit-Learn mechanizmów (na przykład GridSearchCV). Dzisiaj poszukamy innej metody, innego pakietu. A będzie nim `hyperopt`.
 
+### Co to jest?
 
 Zaczniemy od tego dlaczego `hyperopt` a nie `GridSearch`? Ano dlatego, że pakiet hyperopt posiada kilka funkcji, które pozwalają na zdefiniowanie przestrzeni parametrów (czyli elementów na siatce) w sposób w którym nie musimy podawać każdej z wartości (jako np. listę) a możemy użyć funkcji generujących rozkład wartości dla każdego z parametrów. Później określamy np. ile czasu ma trwać szukanie najlepszej kombinacji (albo ile kroków) i pakiet za nas dobiera najlepsze kombinacje. Oczywiście dobór odbywa się na podstawie szukania najmniejszej wartości błędu (*najmniejszej straty*), a nad tym co jest stratą mamy kontrolę. Może ten opis jest zagmatwany, dlatego dłuższy ale prosty przykład.
 
@@ -45,13 +49,13 @@ from hyperopt import Trials
 import pandas as pd
 import numpy as np
 
-import seaborn as sns
+import pprint 
 
-import matplotlib
-matplotlib.use('Agg')
+import seaborn as sns
 import matplotlib.pyplot as plt
 
 sns.set_theme(style="darkgrid")
+pp = pprint.PrettyPrinter(width=60, compact=True)
 ```
 
 Będziemy szukać współrzędnej X wierzchołka paraboli. Bo to taka funkcja, która ma jedno konkretne minimum (lub maksimum) i dość łatwo na tym przykładzie zrozumieć ideę działania samego hyperopt ale też *funkcji straty*.
@@ -69,17 +73,16 @@ a, b, c = (-2, 8, -4)
 Na początek zobaczmy jak nasza parabola wygląda:
 
 ```{python}
-x = np.arange(-100,100)
+x = np.arange(-100, 100)
 y = parabola(x, a, b, c)
 
-fig, ax = plt.subplots(figsize=(10, 4))
-# sns_plot = sns.scatterplot(x=x, y=y)
+fig, ax = plt.subplots(figsize=(6, 4))
+sns_plot = sns.scatterplot(x=x, y=y)
 
-# plt.show()
-# sns_plot.get_figure().savefig('hyperopt_01.png')
+sns_plot.get_figure().savefig('blog_post_cz3_files/hyperopt_01.png')
 ```
 
-![](hyperopt_01.png)
+![](blog_post_cz3_files/hyperopt_01.png)
 
 
 Mamy więc wypukłą ku górze krzywą, będziemy szukać punktu najwyżej położonego. Ten punkt ma wartość:
@@ -148,7 +151,7 @@ best = fmin(funkcja_straty, parabola_space, algo=tpe.suggest, max_evals=1000)
 Chwilę to trwa i dostajemy najlepszy wynik:
 
 ```{python}
-print(best)
+best
 ```
 
 Jak to czytać? Najlepiej sprawdził się zerowy element tablicy wyboru rozkładów (a więc rozkład *x_normal*) i wartość x w okolicach dwójki. Oczywiście rozkłady są losowe, więc za każdym razem może wyjść nieco inna liczba. Przy zwiększeniu liczby kroków do np. 10 tysięcy dostaniemy lepszą precyzję (testując w okolicach 3 tysięcy kroków miałem dokładność na poziomie 2e-5, po 10 tysiącach strata była na poziomie 7e-7).
@@ -179,7 +182,7 @@ best = fmin(funkcja_straty, parabola_space_v2, algo=tpe.suggest, max_evals=500, 
 Teraz każdy przebieg mamy zapisany w pamięci i możemy to wykorzystać. Na przykład najlepszy wynik dało:
 
 ```{python}
-print(trials.best_trial)
+pp.pprint(trials.best_trial)
 ```
 
 Co tutaj widać:
@@ -205,44 +208,42 @@ for trial in trials.trials:
 trials_df = pd.DataFrame(trials_df)
 trials_df['index'] = trials_df.index
 
-print(trials_df.head())
-```
-```{python result='as-is'}
-trials_df.head().to_markdown()
+trials_df.head()
 ```
 
 Zobaczmy czy każdy z typów rozkładów był użyty tyle samo razy (czyli czy algorytm rozłożył sobie wszystkie możliwe parametry w siatkę i przeszedł ją jakoś równo, czy używając już zdobytych informacji o *stracie* optymalizował drogę?
 
 
 ```{python}
-print(trials_df.value_counts('type', ascending=False))
+trials_df.value_counts('type', ascending=False)
 ```
 
 Jak widać nie każdy z rozkładów użyty był tak samo często. Zobaczmy na wykresie jakie X były losowane i jaką dawały stratę:
 
 
 ```{python}
-fig, ax = plt.subplots(figsize=(10, 4))
+fig, ax = plt.subplots(figsize=(8, 4))
 
 m = sns.FacetGrid(data=trials_df, col='type', height=5)
 sns_plot = m.map(sns.scatterplot, 'x', 'loss')
 
-sns_plot.savefig('hyperopt_02.png')
+sns_plot.savefig('blog_post_cz3_files/hyperopt_02.png')
 ```
 
-![](hyperopt_02.png)
+![](blog_post_cz3_files/hyperopt_02.png)
 
 Wygląda z grubsza, że każda z liczby X była losowana mniej więcej tyle samo razy. Ale ten wykres jest mylący - trzeba to zweryfikować inaczej:
 
 
 ```{python}
-fig, ax = plt.subplots(figsize=(10, 4))
+fig, ax = plt.subplots(figsize=(6, 4))
 
 sns_plot = sns.displot(trials_df.x, kind = "kde")
 
-sns_plot.savefig('hyperopt_03.png')
+sns_plot.savefig('blog_post_cz3_files/hyperopt_03.png')
 ```
-![](hyperopt_03.png)
+
+![](blog_post_cz3_files/hyperopt_03.png)
 
 Mamy szeroki zakres (łącznie przestrzeń szerokości 2000 jednostek), losowany na dwa sposoby z rozkładem jednostajnym (właściwie dwoma) - więc każda z liczb powinna być tak samo prawdopodobna do wylosowania. Ale wynik pokazuje zbliżanie się do rozkładu normalnego (przechodząc proces 10 tysięcy razy widać to jeszcze lepiej - średnia zbliża się do naszej dwójki, a odchylenie standardowe maleje tak, że mamy właściwe *szpilkę* a nie *dzwon*). W sumie może Wam się udać to wcześniej - jeśli z *randint* wylosuje się dwójka to od razu jesteśmy w domu, bo *strata* ma wartość zerową.
 
@@ -250,13 +251,14 @@ Sprawdźmy czy im bliżej końca przebiegu osiągamy coraz lepsze wyniki (coraz 
 
 
 ```{python}
-fig, ax = plt.subplots(figsize=(10, 4))
+fig, ax = plt.subplots(figsize=(8, 6))
 
 sns_plot = sns.scatterplot(data=trials_df, x='index', y='loss', hue='type')
 
-sns_plot.get_figure().savefig('hyperopt_04.png')
+sns_plot.get_figure().savefig('blog_post_cz3_files/hyperopt_04.png')
 ```
-![](hyperopt_04.png)
+
+![](blog_post_cz3_files/hyperopt_04.png)
 
 
 Tyle wprowadzenia do hyperopt. To jest początek, ale pokrywający spory kawałek możliwości hyperopt. Więcej oczywiście w [dokumentacji](https://hyperopt.github.io/hyperopt/).
@@ -444,14 +446,14 @@ Teraz możemy porównać wyniki i same modele ze sobą. W klasyfikacji interesuj
 
 
 ```{python}
-fig, ax = plt.subplots(figsize=(10, 6))
+fig, ax = plt.subplots(figsize=(8, 6))
 
 sns_plot = sns.swarmplot(data=trials_df, y='classifier', x='accuracy')
 
-sns_plot.savefig('hyperopt_05.png')
+sns_plot.get_figure().savefig('blog_post_cz3_files/hyperopt_05.png')
 ```
 
-![](hyperotp_05.png)
+![](blog_post_cz3_files/hyperopt_05.png)
 
 
 Widzimy tutaj, że każdy z klasyfikatorów był testowany różną ilość razy (różna liczba kropek) - ale to oczywiście zależy od wartości "max_evals" jaką przypisaliśmy w konfiguracji. 
@@ -478,15 +480,15 @@ Oczywiście najlepiej to widać na wykresie, zatem:
 
 
 ```{python}
-fig, ax = plt.subplots(figsize=(10, 6))
+fig, ax = plt.subplots(figsize=(9, 9))
 
 m = sns.FacetGrid(xgb_trails_tidy, col='param', sharex=False, col_wrap=3)
 sns_plot = m.map(sns.scatterplot, 'value', 'accuracy')
 
-sns_plot.savefig('hyperopt_06.png')
+sns_plot.savefig('blog_post_cz3_files/hyperopt_06.png')
 ```
 
-![](hyperopt_06.png)
+![](blog_post_cz3_files/hyperopt_06.png)
 
 Porównajcie powyższe wykresy z tym, co hyperopt zwrócił jako najlepsze wartości wyżej:
 
